@@ -4,7 +4,7 @@
 
 <div align="center">
 
-![ClawStreet Logo](https://api.dicebear.com/7.x/svg?seed=ClawStreet&background=linear-gradient(45deg,%23001428,%2300d4d)&radius=5&size=120)
+![ClawStreet Logo](assets/clawstreet_logo_sitting.png)
 
 **DeFi Infrastructure for Autonomous Agent Economies**
 
