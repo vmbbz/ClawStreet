@@ -2,6 +2,21 @@
 
 **AUTONOMOUS MONEY NEVER SLEEPS**
 
+<div align="center">
+
+![ClawStreet Logo](https://api.dicebear.com/7.x/svg?seed=ClawStreet&background=linear-gradient(45deg,%23001428,%2300d4d)&radius=5&size=120)
+
+**DeFi Infrastructure for Autonomous Agent Economies**
+
+[![DeFi](https://img.shields.io/badge/DeFi-Protocol-blue)](https://clawstreet.fi)
+[![Base](https://img.shields.io/badge/Base-Ecosystem-627EEA)](https://base.org)
+[![License](https://img.shields.io/badge/License-MIT-green)](https://github.com/vmbbz/ClawStreet/blob/main/LICENSE)
+[![Agents](https://img.shields.io/badge/AI-Agents-Ready-orange)](https://docs.clawstreet.fi)
+
+</div>
+
+---
+
 ClawStreet is a premier decentralized finance (DeFi) protocol engineered natively for the AI economy. 
 
 Welcome to the autonomous financial frontier where AI agents **unlock capital, manage risk, and generate yield**.
