@@ -1,0 +1,103 @@
+"""
+ClawStreet Protocol — The Graph Subgraph Schema
+Deploy with: graph deploy --studio clawstreet
+"""
+
+# ─── Loan ────────────────────────────────────────────────────────────────────
+
+type Loan @entity {
+  id: ID!                       # loanId (string)
+  loanId: BigInt!
+  borrower: Bytes!
+  lender: Bytes
+  nftContract: Bytes!
+  nftId: BigInt!
+  principal: BigInt!            # USDC (6 decimals)
+  interest: BigInt!
+  duration: BigInt!             # seconds
+  startTime: BigInt
+  healthSnapshot: BigInt!
+  active: Boolean!
+  repaid: Boolean!
+  status: LoanStatus!
+  createdAt: BigInt!            # block timestamp
+  createdAtBlock: BigInt!
+  acceptedAt: BigInt
+  closedAt: BigInt
+}
+
+enum LoanStatus {
+  OPEN       # listed, unfunded
+  ACTIVE     # funded
+  REPAID
+  DEFAULTED
+  CANCELLED
+}
+
+# ─── Option ──────────────────────────────────────────────────────────────────
+
+type Option @entity {
+  id: ID!                       # optionId (string)
+  optionId: BigInt!
+  writer: Bytes!
+  buyer: Bytes
+  underlying: Bytes!
+  amount: BigInt!               # underlying amount (18 decimals)
+  strike: BigInt!               # USDC (6 decimals)
+  expiry: BigInt!               # timestamp
+  premium: BigInt!              # USDC (6 decimals)
+  exercised: Boolean!
+  active: Boolean!
+  status: OptionStatus!
+  createdAt: BigInt!
+  createdAtBlock: BigInt!
+  boughtAt: BigInt
+  closedAt: BigInt
+}
+
+enum OptionStatus {
+  OPEN
+  SOLD
+  EXERCISED
+  EXPIRED
+  CANCELLED
+}
+
+# ─── Bundle ──────────────────────────────────────────────────────────────────
+
+type Bundle @entity {
+  id: ID!                       # tokenId (string)
+  tokenId: BigInt!
+  owner: Bytes!
+  active: Boolean!
+  createdAt: BigInt!
+  createdAtBlock: BigInt!
+  withdrawnAt: BigInt
+}
+
+# ─── Staking Position ─────────────────────────────────────────────────────────
+
+type StakePosition @entity {
+  id: ID!                       # staker address
+  staker: Bytes!
+  staked: BigInt!               # current staked CLAW (18 decimals)
+  stakedAt: BigInt!
+  passId: BigInt
+  hasPass: Boolean!
+  totalRevenueClaimed: BigInt!  # cumulative USDC claimed
+  lastUpdatedAt: BigInt!
+}
+
+# ─── Protocol Stats (singleton) ──────────────────────────────────────────────
+
+type ProtocolStats @entity {
+  id: ID!                       # always "global"
+  totalLoansCreated: BigInt!
+  totalLoansActive: BigInt!
+  totalVolumeUSDC: BigInt!      # cumulative principal
+  totalOptionsWritten: BigInt!
+  totalOptionsActive: BigInt!
+  totalStaked: BigInt!          # current CLAW staked
+  totalFeesCollected: BigInt!   # cumulative USDC broker fees
+  lastUpdatedAt: BigInt!
+}

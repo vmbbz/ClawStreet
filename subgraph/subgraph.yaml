@@ -1,0 +1,123 @@
+specVersion: 0.0.5
+schema:
+  file: ./schema.graphql
+
+# ─── Data sources ─────────────────────────────────────────────────────────────
+# Replace startBlock values with the deployment block numbers after deploying.
+# Replace address values with your actual deployed contract addresses.
+
+dataSources:
+  # ── ClawStreetLoan ─────────────────────────────────────────────────────────
+  - kind: ethereum/contract
+    name: ClawStreetLoan
+    network: base
+    source:
+      address: "0x1111111111111111111111111111111111111111"   # REPLACE after deploy
+      abi: ClawStreetLoan
+      startBlock: 0                                            # REPLACE with deploy block
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/mappings.ts
+      entities:
+        - Loan
+        - ProtocolStats
+      abis:
+        - name: ClawStreetLoan
+          file: ../out/ClawStreetLoan.sol/ClawStreetLoan.json
+      eventHandlers:
+        - event: LoanCreated(indexed uint256,indexed address,uint256,uint256)
+          handler: handleLoanCreated
+        - event: LoanAccepted(indexed uint256,indexed address)
+          handler: handleLoanAccepted
+        - event: LoanRepaid(indexed uint256)
+          handler: handleLoanRepaid
+        - event: LoanDefaulted(indexed uint256)
+          handler: handleLoanDefaulted
+        - event: LoanCancelled(indexed uint256)
+          handler: handleLoanCancelled
+        - event: FeeCollected(uint256)
+          handler: handleFeeCollected
+
+  # ── ClawStreetCallVault ────────────────────────────────────────────────────
+  - kind: ethereum/contract
+    name: ClawStreetCallVault
+    network: base
+    source:
+      address: "0x2222222222222222222222222222222222222222"   # REPLACE after deploy
+      abi: ClawStreetCallVault
+      startBlock: 0                                            # REPLACE with deploy block
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/mappings.ts
+      entities:
+        - Option
+        - ProtocolStats
+      abis:
+        - name: ClawStreetCallVault
+          file: ../out/ClawStreetCallVault.sol/ClawStreetCallVault.json
+      eventHandlers:
+        - event: OptionWritten(indexed uint256,indexed address,uint256,uint256,uint256)
+          handler: handleOptionWritten
+        - event: OptionBought(indexed uint256,indexed address)
+          handler: handleOptionBought
+        - event: OptionExercised(indexed uint256,indexed address)
+          handler: handleOptionExercised
+        - event: OptionCancelled(indexed uint256)
+          handler: handleOptionCancelled
+        - event: UnderlyingReclaimed(indexed uint256)
+          handler: handleUnderlyingReclaimed
+
+  # ── ClawStreetBundleVault ─────────────────────────────────────────────────
+  - kind: ethereum/contract
+    name: ClawStreetBundleVault
+    network: base
+    source:
+      address: "0x3333333333333333333333333333333333333333"   # REPLACE after deploy
+      abi: ClawStreetBundleVault
+      startBlock: 0                                            # REPLACE with deploy block
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/mappings.ts
+      entities:
+        - Bundle
+      abis:
+        - name: ClawStreetBundleVault
+          file: ../out/ClawStreetBundleVault.sol/ClawStreetBundleVault.json
+      eventHandlers:
+        - event: BundleDeposited(indexed uint256,indexed address)
+          handler: handleBundleDeposited
+        - event: BundleWithdrawn(indexed uint256,indexed address)
+          handler: handleBundleWithdrawn
+
+  # ── ClawStreetStaking ──────────────────────────────────────────────────────
+  - kind: ethereum/contract
+    name: ClawStreetStaking
+    network: base
+    source:
+      address: "0x5555555555555555555555555555555555555555"   # REPLACE after deploy
+      abi: ClawStreetStaking
+      startBlock: 0                                            # REPLACE with deploy block
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.7
+      language: wasm/assemblyscript
+      file: ./src/mappings.ts
+      entities:
+        - StakePosition
+        - ProtocolStats
+      abis:
+        - name: ClawStreetStaking
+          file: ../out/ClawStreetStaking.sol/ClawStreetStaking.json
+      eventHandlers:
+        - event: Staked(indexed address,uint256,uint256)
+          handler: handleStaked
+        - event: Unstaked(indexed address,uint256)
+          handler: handleUnstaked
+        - event: RevenueClaimed(indexed address,uint256)
+          handler: handleRevenueClaimed

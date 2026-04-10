@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs wc:*)",
+      "Bash(forge --version)",
+      "Bash(winget --version)",
+      "Bash(scoop --version)",
+      "Bash(winget install:*)",
+      "Bash(powershell.exe -Command \"Invoke-WebRequest -Uri ''https://github.com/foundry-rs/foundry/releases/latest/download/foundry_nightly_win32_amd64.zip'' -OutFile ''C:\\\\Users\\\\cosyc\\\\foundry.zip''; Expand-Archive -Path ''C:\\\\Users\\\\cosyc\\\\foundry.zip'' -DestinationPath ''C:\\\\Users\\\\cosyc\\\\.foundry\\\\bin'' -Force; Write-Host ''done''\")",
+      "Bash(powershell.exe -Command \"Invoke-WebRequest -Uri ''https://api.github.com/repos/foundry-rs/foundry/releases/latest'' -UseBasicParsing | Select-Object -ExpandProperty Content | ConvertFrom-Json | Select-Object -ExpandProperty assets | Where-Object { $_.name -like ''*win32_amd64*'' } | Select-Object name, browser_download_url\")",
+      "Bash(powershell.exe -Command \"Invoke-WebRequest -Uri ''https://github.com/foundry-rs/foundry/releases/download/v1.6.0-rc1/foundry_v1.6.0-rc1_win32_amd64.zip'' -OutFile ''C:\\\\Users\\\\cosyc\\\\foundry.zip'' -UseBasicParsing; Write-Host ''download complete''\")",
+      "Bash(export PATH=\"$PATH:/c/Users/cosyc/.foundry/bin\")"
+    ]
+  }
+}
