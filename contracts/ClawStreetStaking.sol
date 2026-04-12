@@ -48,6 +48,9 @@ contract ClawStreetStaking is ERC721, Ownable, ReentrancyGuard {
     // Global revenue accumulator (scaled by PRECISION)
     uint256 public revenuePerShareAccumulated;
 
+    // Fees received when totalStaked == 0 — distributed on next notifyFee
+    uint256 public unallocatedFees;
+
     // Per-staker state
     struct Position {
         uint256 staked;       // CLAW staked (18 decimals)
@@ -93,6 +96,18 @@ contract ClawStreetStaking is ERC721, Ownable, ReentrancyGuard {
         emit FeeNotifierSet(notifier, enabled);
     }
 
+    /**
+     * @notice Escape-hatch: withdraw unallocated fees (those received when no stakers existed).
+     * @param to Address to receive the unallocated USDC.
+     */
+    function withdrawUnallocatedFees(address to) external onlyOwner {
+        require(to != address(0), "Zero address");
+        uint256 amount = unallocatedFees;
+        require(amount > 0, "No unallocated fees");
+        unallocatedFees = 0;
+        require(revenueToken.transfer(to, amount), "Transfer failed");
+    }
+
     function setBaseURI(string calldata uri) external onlyOwner {
         baseTokenURI = uri;
         emit BaseURIUpdated(uri);
@@ -109,12 +124,15 @@ contract ClawStreetStaking is ERC721, Ownable, ReentrancyGuard {
         require(amount > 0, "Zero fee");
 
         if (totalStaked == 0) {
-            // No stakers — fees accumulate in contract, claimable later
+            // No stakers — accumulate for distribution once stakers exist
+            unallocatedFees += amount;
             return;
         }
 
-        revenuePerShareAccumulated += (amount * PRECISION) / totalStaked;
-        emit FeeNotified(msg.sender, amount);
+        uint256 distributable = amount + unallocatedFees;
+        unallocatedFees = 0;
+        revenuePerShareAccumulated += (distributable * PRECISION) / totalStaked;
+        emit FeeNotified(msg.sender, distributable);
     }
 
     // ─── Staking ──────────────────────────────────────────────────────────────
@@ -227,6 +245,14 @@ contract ClawStreetStaking is ERC721, Ownable, ReentrancyGuard {
     }
 
     // ─── ERC-721 overrides (soul-bound) ───────────────────────────────────────
+
+    function approve(address, uint256) public override {
+        revert("ClawPass: non-transferable");
+    }
+
+    function setApprovalForAll(address, bool) public override {
+        revert("ClawPass: non-transferable");
+    }
 
     /**
      * @dev Block all transfers except mint (from == 0) and burn (to == 0).

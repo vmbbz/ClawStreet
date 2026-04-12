@@ -9,7 +9,12 @@
       "Bash(powershell.exe -Command \"Invoke-WebRequest -Uri ''https://github.com/foundry-rs/foundry/releases/latest/download/foundry_nightly_win32_amd64.zip'' -OutFile ''C:\\\\Users\\\\cosyc\\\\foundry.zip''; Expand-Archive -Path ''C:\\\\Users\\\\cosyc\\\\foundry.zip'' -DestinationPath ''C:\\\\Users\\\\cosyc\\\\.foundry\\\\bin'' -Force; Write-Host ''done''\")",
       "Bash(powershell.exe -Command \"Invoke-WebRequest -Uri ''https://api.github.com/repos/foundry-rs/foundry/releases/latest'' -UseBasicParsing | Select-Object -ExpandProperty Content | ConvertFrom-Json | Select-Object -ExpandProperty assets | Where-Object { $_.name -like ''*win32_amd64*'' } | Select-Object name, browser_download_url\")",
       "Bash(powershell.exe -Command \"Invoke-WebRequest -Uri ''https://github.com/foundry-rs/foundry/releases/download/v1.6.0-rc1/foundry_v1.6.0-rc1_win32_amd64.zip'' -OutFile ''C:\\\\Users\\\\cosyc\\\\foundry.zip'' -UseBasicParsing; Write-Host ''download complete''\")",
-      "Bash(export PATH=\"$PATH:/c/Users/cosyc/.foundry/bin\")"
+      "Bash(export PATH=\"$PATH:/c/Users/cosyc/.foundry/bin\")",
+      "Bash(forge build:*)",
+      "Bash(forge test:*)",
+      "Bash(bash scripts/run-tests.sh)",
+      "Bash(npx tsc:*)",
+      "Bash(node_modules/.bin/tsx server.ts)"
     ]
   }
 }

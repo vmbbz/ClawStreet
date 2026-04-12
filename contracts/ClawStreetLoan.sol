@@ -47,6 +47,7 @@ contract ClawStreetLoan is
     uint256 public loanCounter;
 
     uint256 public constant BROKER_FEE_BPS = 100; // 1%
+    uint256 public constant MIN_DURATION = 1 hours;
     IERC20 public feeToken;
     IPyth public pythOracle;
     bytes32 public priceFeedId; // e.g. ETH/USD or collection-specific
@@ -156,8 +157,13 @@ contract ClawStreetLoan is
         return Math.min(100, finalScore);
     }
 
-    // Suggested max LTV based on health (70% base, tighter on low health)
+    // Suggested max LTV based on health (70% base, tighter on low health).
+    // Formula: 9000 - (100 - health) * 200 bps.
+    // Breakeven at health == 55 → 0 bps. Below 55 → 0 bps (no borrowing).
+    // Reverts for health > 100 (getHealthScore already clamps to 100).
     function suggestLTV(uint256 health) public pure returns (uint256) {
+        require(health <= 100, "Health out of range");
+        if (health < 55) return 0;
         return Math.min(7000, 9000 - (100 - health) * 200);
     }
 
@@ -169,7 +175,7 @@ contract ClawStreetLoan is
         uint256 duration
     ) external nonReentrant whenNotPaused {
         require(principal > 0, "Principal must be > 0");
-        require(duration > 0, "Duration must be > 0");
+        require(duration >= MIN_DURATION, "Duration too short");
 
         // Escrow the NFT
         IERC721(nftContract).transferFrom(msg.sender, address(this), nftId);
@@ -248,7 +254,7 @@ contract ClawStreetLoan is
     function repayLoan(uint256 loanId) external nonReentrant whenNotPaused {
         Loan storage loan = loans[loanId];
         require(loan.active && !loan.repaid, "Invalid loan state");
-        require(msg.sender == loan.borrower || msg.sender == loan.lender, "Not authorized");
+        require(msg.sender == loan.borrower, "Only borrower can repay");
 
         uint256 totalRepay = loan.principal + loan.interest;
 
@@ -267,6 +273,7 @@ contract ClawStreetLoan is
     function claimDefault(uint256 loanId) external nonReentrant whenNotPaused {
         Loan storage loan = loans[loanId];
         require(loan.active && !loan.repaid, "Invalid loan");
+        require(loan.lender != address(0), "Loan not funded");
         require(block.timestamp > loan.startTime + loan.duration, "Not yet defaulted");
 
         // Lender claims the NFT

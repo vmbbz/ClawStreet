@@ -62,7 +62,9 @@ contract ClawStreetCallVault is
     ) external nonReentrant returns (uint256) {
         require(expiry > block.timestamp, "Expiry must be in future");
         require(amount > 0, "Amount must be > 0");
-        
+        require(strike > 0, "Strike must be > 0");
+        require(premium > 0, "Premium must be > 0");
+
         // Lock underlying asset
         require(IERC20(underlying).transferFrom(msg.sender, address(this), amount), "Underlying transfer failed");
 
@@ -111,7 +113,7 @@ contract ClawStreetCallVault is
         CallOption storage option = options[optionId];
         require(option.buyer == msg.sender, "Not buyer");
         require(!option.exercised, "Already exercised");
-        require(block.timestamp <= option.expiry, "Expired");
+        require(block.timestamp < option.expiry, "Expired");
 
         // Settlement logic: Buyer pays strike price to writer
         require(premiumToken.transferFrom(msg.sender, option.writer, option.strike), "Strike transfer failed");

@@ -7,15 +7,19 @@ import "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol"
 import "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/token/ERC721/extensions/ERC721URIStorageUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 contract ClawStreetBundleVault is
     Initializable,
     UUPSUpgradeable,
     AccessControlUpgradeable,
     ERC721Upgradeable,
-    ERC721URIStorageUpgradeable
+    ERC721URIStorageUpgradeable,
+    ReentrancyGuard
 {
+    using SafeERC20 for IERC20;
     bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
 
     uint256 private _nextTokenId;
@@ -53,15 +57,16 @@ contract ClawStreetBundleVault is
         address[] calldata erc721Contracts,
         uint256[] calldata erc721Ids,
         string calldata metadataURI
-    ) external returns (uint256) {
+    ) external nonReentrant returns (uint256) {
         require(erc20Tokens.length == erc20Amounts.length, "ERC20 length mismatch");
         require(erc721Contracts.length == erc721Ids.length, "ERC721 length mismatch");
+        require(erc20Tokens.length + erc721Contracts.length > 0, "Bundle cannot be empty");
 
         uint256 tokenId = _nextTokenId++;
 
         // Transfer ERC20s
         for (uint256 i = 0; i < erc20Tokens.length; i++) {
-            IERC20(erc20Tokens[i]).transferFrom(msg.sender, address(this), erc20Amounts[i]);
+            IERC20(erc20Tokens[i]).safeTransferFrom(msg.sender, address(this), erc20Amounts[i]);
         }
 
         // Transfer ERC721s (e.g. Uniswap V3 positions)
@@ -83,14 +88,14 @@ contract ClawStreetBundleVault is
         return tokenId;
     }
 
-    function withdrawBundle(uint256 tokenId) external {
+    function withdrawBundle(uint256 tokenId) external nonReentrant {
         require(ownerOf(tokenId) == msg.sender, "Not owner");
 
         BundleContent storage content = bundleContents[tokenId];
 
         // Return ERC20s
         for (uint256 i = 0; i < content.erc20Tokens.length; i++) {
-            IERC20(content.erc20Tokens[i]).transfer(msg.sender, content.erc20Amounts[i]);
+            IERC20(content.erc20Tokens[i]).safeTransfer(msg.sender, content.erc20Amounts[i]);
         }
 
         // Return ERC721s

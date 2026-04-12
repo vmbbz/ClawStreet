@@ -976,8 +976,8 @@ Before setting up ClawStreet, ensure you have the following prerequisites:
 git clone https://github.com/vmbbz/ClawStreet.git
 cd ClawStreet
 
-# Install frontend dependencies
-npm install
+# Install frontend dependencies (--legacy-peer-deps needed for wagmi v3 / rainbowkit v2)
+npm install --legacy-peer-deps
 
 # Install Foundry dependencies
 forge install
@@ -993,112 +993,100 @@ npm --version
 Create and configure your environment file:
 
 ```bash
-# Copy the example environment file
 cp .env.example .env
-
-# Edit the environment file with your configuration
-nano .env
 ```
 
-**Environment Variables Configuration:**
+**Required variables in `.env`:**
 
 ```bash
-# Network Configuration
-BASE_SEPOLIA_RPC=https://sepolia.base.org
-BASE_MAINNET_RPC=https://mainnet.base.org
-BASESCAN_API_KEY=your_basescan_api_key
+# Your deployer wallet private key
+DEPLOYER_PRIVATE_KEY=0xYOUR_PRIVATE_KEY
 
-# Contract Addresses (populated after deployment)
-LOAN_ENGINE_ADDRESS=0x1111111111111111111111111111111111111111
-CALL_VAULT_ADDRESS=0x2222222222222222222222222222222222222222
-BUNDLE_VAULT_ADDRESS=0x3333333333333333333333333333333333333333
-CLAW_TOKEN_ADDRESS=0x4444444444444444444444444444444444444444
-STAKING_ADDRESS=0x5555555555555555555555555555555555555555
+# Alchemy RPC (free at alchemy.com)
+BASE_SEPOLIA_RPC=https://base-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_KEY
 
-# Pyth Network Configuration
-PYTH_PRICE_FEED_ID=0x1234567890abcdef1234567890abcdef12345678
-PYTH_NETWORK_ADDRESS=0xA2aa506b405bE5C8b1234567890abcdef12345678
+# Basescan contract verification (free at basescan.org/myapikey)
+BASESCAN_API_KEY=YOUR_BASESCAN_API_KEY
 
-# Frontend Configuration
-VITE_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
-VITE_INFURA_PROJECT_ID=your_infura_project_id
-VITE_ALCHEMY_API_KEY=your_alchemy_api_key
-
-# IPFS Configuration
-IPFS_GATEWAY=https://ipfs.io/ipfs/
-PINATA_API_KEY=your_pinata_api_key
-PINATA_SECRET_KEY=your_pinata_secret_key
+# Pyth oracle — pre-filled, no account needed
+PYTH_ADDRESS=0xA2aa501b19aff244D90cc15a4Cf739D2725B5729
+PYTH_ETH_USD_FEED_ID=0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace
 ```
+
+> All contract addresses (`USDC_ADDRESS`, `CLAW_TOKEN_ADDRESS`, `STAKING_ADDRESS`, etc.) and agent addresses (`AGENT1_ADDRESS`…`AGENT5_ADDRESS`) are **auto-filled** by the bootstrap script — leave them blank.
+
+See [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) for the full deployment guide.
 
 #### 3. Smart Contract Development
 
 ```bash
-# Run comprehensive test suite
-forge test --gas-report
+# Full test suite (284 tests: unit + fuzz + stateful invariants)
+bash scripts/run-tests.sh
 
-# Run specific test file
-forge test --match-test testLoanCreation -vv
+# Quick unit run
+forge test -vv
 
-# Perform gas optimization analysis
+# Run invariant tests only (stateful, 256×500 = 128,000 calls each)
+forge test --match-path "test/invariants/**" -v
+
+# Run a specific test
+forge test --match-test test_stakeAndUnstake -vvvv
+
+# Gas snapshot
 forge snapshot
-
-# Local deployment for testing
-anvil --fork-url https://sepolia.base.org --fork-block-number latest
-forge script script/DeployClawStreet.s.sol --rpc-url localhost --broadcast
-
-# Verify contract on BaseScan
-forge verify-contract <contract_address> --chain-id 84532
 ```
 
 #### 4. Frontend Development
 
 ```bash
-# Start development server with hot reload
+# Start development server
 npm run dev
+# → http://localhost:3000
 
 # Build for production
 npm run build
 
-# Run type checking
+# Type checking
 npm run lint
-
-# Run end-to-end tests
-npm run test:e2e
-
-# Preview production build
-npm run preview
 ```
 
 ### Production Deployment
 
-#### Testnet Deployment (Base Sepolia)
+#### One-Command Bootstrap (Base Sepolia)
+
+After funding your deployer wallet with ≥ 0.35 ETH from the [Coinbase faucet](https://www.coinbase.com/faucets/base-ethereum-goerli-faucet):
 
 ```bash
-# Deploy to Base Sepolia testnet
-forge script script/DeployClawStreet.s.sol \
-  --rpc-url base_sepolia \
-  --broadcast \
-  --verify \
-  --etherscan-api-key $BASESCAN_API_KEY
+# Full setup: wallets → ETH dispersal → deploy all contracts → fund agents
+bash scripts/bootstrap.sh
 
-# Verify deployment
-forge script script/VerifyDeployment.s.sol --rpc-url base_sepolia
+# Options
+bash scripts/bootstrap.sh --skip-eth   # skip ETH dispersal (already done)
+bash scripts/bootstrap.sh --dry-run    # simulate without broadcasting
 ```
 
-#### Mainnet Deployment (Base Mainnet)
+**What the bootstrap deploys** (one transaction batch, auto-verified on Basescan):
 
-```bash
-# Deploy to Base Mainnet (requires careful preparation)
-forge script script/DeployClawStreet.s.sol \
-  --rpc-url base_mainnet \
-  --broadcast \
-  --verify \
-  --etherscan-api-key $BASESCAN_API_KEY \
-  --slow
+| Contract | Type | Purpose |
+|----------|------|---------|
+| MockUSDC | ERC-20 | Test stablecoin (unlimited mint) |
+| ClawToken ($CLAW) | ERC-20, 100M cap | Protocol governance token |
+| ClawStreetStaking | ERC-721 + revenue share | Stake CLAW → ClawPass NFT |
+| ClawStreetLoan | UUPS proxy | NFT-collateralised P2P loans |
+| ClawStreetCallVault | UUPS proxy | Covered call options |
+| ClawStreetBundleVault | UUPS proxy | Bundle ERC-20s + ERC-721s |
 
-# Post-deployment verification
-forge script script/PostDeploymentChecks.s.sol --rpc-url base_mainnet
-```
+**Agent wallets auto-funded** (from your deployer):
+
+| Agent | ETH | MockUSDC | CLAW |
+|-------|-----|----------|------|
+| Agent1 Alpha (Market Maker) | 0.05 | 1,000 | 100,000 |
+| Agent2 Beta (Arbitrageur) | 0.05 | 500 | 50,000 |
+| Agent3 Gamma (Lender) | 0.05 | 2,000 | — |
+| Agent4 Delta (Borrower) | 0.05 | 500 | — (5 test NFTs) |
+| Agent5 Epsilon (Options Writer) | 0.05 | 1,000 | 50,000 |
+
+For step-by-step instructions, troubleshooting, and faucet links see [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md).
 
 #### Deployment Checklist
 
@@ -1179,6 +1167,8 @@ graph TD
 - [Deal Visualization](./docs/DealVisualization.md) - Real-time transaction timeline implementation
 
 **Technical References:**
+- [Deployment Guide](./docs/DEPLOYMENT.md) - One-command bootstrap, agent wallet setup, faucets, costs, troubleshooting
+- [Testing Guide](./docs/TESTING.md) - All 284 tests documented, audit findings, invariant properties
 - [Smart Contract Architecture](./docs/Smart_Contract_Architecture.md) - Detailed contract interaction patterns and upgrade mechanisms
 - [Security Audits](./docs/Security_Audits.md) - Comprehensive audit reports and security best practices
 - [Gas Optimization](./docs/Gas_Optimization.md) - Transaction cost minimization techniques and benchmarks
@@ -1408,12 +1398,13 @@ gitGraph
 
 #### Testing Requirements
 
-**Smart Contract Testing:**
-- Unit tests for all functions with >95% coverage
-- Integration tests for contract interactions
-- Gas optimization benchmarks
-- Security vulnerability assessments
-- Edge case testing with boundary conditions
+**Smart Contract Testing (284 tests across 10 files):**
+- Unit + fuzz tests for all core functions (`forge test -vv`)
+- Edge case and integration test files (`.edge.t.sol`)
+- Stateful invariant tests (256 runs × 500 calls each) in `test/invariants/`
+- Gas optimization benchmarks (`forge snapshot`)
+- Run the full suite: `bash scripts/run-tests.sh`
+- See [`docs/TESTING.md`](./docs/TESTING.md) for test inventory and audit findings
 
 **Frontend Testing:**
 - Unit tests for all components and utilities

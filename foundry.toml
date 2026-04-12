@@ -6,6 +6,7 @@ test = "test"
 script = "script"
 optimizer = true
 optimizer_runs = 200
+via_ir = true
 solc = "0.8.24"
 ffi = false
 verbosity = 2
