@@ -1,50 +1,39 @@
 {
-  "_comment": "Base Sepolia testnet addresses. Verify each before use.",
+  "_comment": "Base Sepolia testnet — deployed 2026-04-12 via DeployAll.s.sol",
   "network": {
     "name": "Base Sepolia",
     "chainId": 84532,
-    "rpc": "https://sepolia.base.org",
+    "rpc": "https://base-sepolia.g.alchemy.com/v2/YOUR_ALCHEMY_KEY",
     "explorer": "https://sepolia.basescan.org",
     "faucets": {
       "eth": "https://www.coinbase.com/faucets/base-ethereum-goerli-faucet",
-      "usdc": "https://faucet.circle.com"
+      "usdc": "MockUSDC is self-minting — no faucet needed"
     }
   },
   "tokens": {
-    "USDC": {
-      "address": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+    "MockUSDC": {
+      "address": "0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A",
       "decimals": 6,
       "symbol": "USDC",
-      "note": "Circle official testnet USDC on Base Sepolia"
+      "note": "ClawStreet mintable test USDC — unlimited mint by owner"
+    },
+    "ClawToken": {
+      "address": "0xD11fC366828445B874F5202109E5f48C4D14FCe4",
+      "decimals": 18,
+      "symbol": "STREET",
+      "note": "$STREET governance token — 100M max cap"
     },
     "WETH": {
       "address": "0x4200000000000000000000000000000000000006",
       "decimals": 18,
       "symbol": "WETH",
-      "note": "Native WETH on Base (same address as mainnet Base)"
-    },
-    "WBTC": {
-      "address": "",
-      "decimals": 8,
-      "symbol": "WBTC",
-      "note": "POPULATE: find or deploy a testnet WBTC mock"
-    },
-    "DAI": {
-      "address": "",
-      "decimals": 18,
-      "symbol": "DAI",
-      "note": "POPULATE: DAI testnet address if available"
+      "note": "Native WETH on Base"
     }
   },
   "nfts": {
-    "note": "NFT collections for loan collateral testing",
     "MockNFT": {
-      "address": "",
-      "note": "DEPLOY: run script/DeployMockNFT.s.sol and paste address here"
-    },
-    "SampleCollection1": {
-      "address": "",
-      "note": "POPULATE: any ERC-721 deployed on Base Sepolia"
+      "address": "0x41119aAd1c69dba3934D0A061d312A52B06B27DF",
+      "note": "ClawStreetTestNFT — 5 tokens minted to Agent4 (borrower)"
     }
   },
   "oracles": {
@@ -59,19 +48,28 @@
     }
   },
   "agents": {
-    "note": "Populate with your deployed agent wallet addresses",
-    "agent1": { "address": "", "name": "LiquidityAgent_Alpha", "role": "market_maker" },
-    "agent2": { "address": "", "name": "ArbitrageAgent_Beta", "role": "arbitrageur" },
-    "agent3": { "address": "", "name": "LendingAgent_Gamma", "role": "lender" },
-    "agent4": { "address": "", "name": "BorrowerAgent_Delta", "role": "borrower" },
-    "agent5": { "address": "", "name": "HedgeAgent_Epsilon", "role": "options_writer" }
+    "agent1": { "address": "0xD1E84c88734013613230678B8E000dE53e4957dC", "name": "LiquidityAgent_Alpha", "role": "market_maker", "eth": "0.03", "usdc": "1000", "claw": "100000" },
+    "agent2": { "address": "0xBaf9d5E05d82bEA9B971B54AD148904ae25876b2", "name": "ArbitrageAgent_Beta",  "role": "arbitrageur",  "eth": "0.03", "usdc": "500",  "claw": "50000" },
+    "agent3": { "address": "0x37D57004FdeBd029d9fcB1Cc88e275fEafA89353", "name": "LendingAgent_Gamma",  "role": "lender",       "eth": "0.03", "usdc": "2000", "claw": "0" },
+    "agent4": { "address": "0x5159345B9944Ab14D05c18853923070D3EBF60ad", "name": "BorrowerAgent_Delta", "role": "borrower",     "eth": "0.03", "usdc": "500",  "claw": "0", "nfts": 5 },
+    "agent5": { "address": "0x4EED792404bbC7bC98648EbE653E38995B8e3DfB", "name": "HedgeAgent_Epsilon", "role": "options_writer","eth": "0.03", "usdc": "1000", "claw": "50000" }
   },
   "deployedContracts": {
-    "note": "Fill in after running DeployClawStreet.s.sol on Base Sepolia",
-    "ClawToken": "",
-    "ClawStreetStaking": "",
-    "ClawStreetLoan": "",
-    "ClawStreetCallVault": "",
-    "ClawStreetBundleVault": ""
+    "MockUSDC":             "0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A",
+    "MockNFT":              "0x41119aAd1c69dba3934D0A061d312A52B06B27DF",
+    "ClawToken":            "0xD11fC366828445B874F5202109E5f48C4D14FCe4",
+    "ClawStreetStaking":    "0xADBf89BA38915B9CF18E0a24Ea3E27F39d920bd3",
+    "ClawStreetBundleVault":"0x86ef420fD3e27c3Ac896c479B19b6A840b97Bee1",
+    "ClawStreetLoan":       "0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c",
+    "ClawStreetCallVault":  "0x69730728a0B19b844bc18888d2317987Bc528baE"
+  },
+  "basescanLinks": {
+    "MockUSDC":             "https://sepolia.basescan.org/address/0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A",
+    "MockNFT":              "https://sepolia.basescan.org/address/0x41119aAd1c69dba3934D0A061d312A52B06B27DF",
+    "ClawToken":            "https://sepolia.basescan.org/address/0xD11fC366828445B874F5202109E5f48C4D14FCe4",
+    "ClawStreetStaking":    "https://sepolia.basescan.org/address/0xADBf89BA38915B9CF18E0a24Ea3E27F39d920bd3",
+    "ClawStreetBundleVault":"https://sepolia.basescan.org/address/0x86ef420fD3e27c3Ac896c479B19b6A840b97Bee1",
+    "ClawStreetLoan":       "https://sepolia.basescan.org/address/0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c",
+    "ClawStreetCallVault":  "https://sepolia.basescan.org/address/0x69730728a0B19b844bc18888d2317987Bc528baE"
   }
 }

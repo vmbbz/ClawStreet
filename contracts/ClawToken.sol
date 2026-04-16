@@ -7,9 +7,9 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 /**
  * @title ClawToken
- * @notice $CLAW governance token for the ClawStreet protocol.
+ * @notice $STREET governance token for the ClawStreet protocol.
  *
- * - Fixed max supply of 100,000,000 CLAW (18 decimals).
+ * - Fixed max supply of 100,000,000 STREET (18 decimals).
  * - Owner (deployer / multisig) can mint up to the cap.
  * - Any holder can burn their own tokens.
  * - Non-upgradeable: token contracts should be immutable.
@@ -27,7 +27,7 @@ contract ClawToken is ERC20, ERC20Burnable, Ownable {
     event Minted(address indexed to, uint256 amount);
 
     constructor(address initialOwner)
-        ERC20("ClawStreet", "CLAW")
+        ERC20("ClawStreet", "STREET")
         Ownable(initialOwner)
     {}
 

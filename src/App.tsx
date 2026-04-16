@@ -12,6 +12,7 @@ import AgentAPI from './pages/AgentAPI';
 import LoanDetails from './pages/LoanDetails';
 import OptionDetails from './pages/OptionDetails';
 import AdminDashboard from './pages/AdminDashboard';
+import TestLab from './pages/TestLab';
 
 function NavLinks() {
   const location = useLocation();
@@ -21,8 +22,9 @@ function NavLinks() {
     { path: '/market', label: 'Marketplace' },
     { path: '/portfolio', label: 'My Loans' },
     { path: '/vault', label: 'Hedge Vault' },
-    { path: '/stake', label: 'Stake $CLAW' },
+    { path: '/stake', label: 'Stake $STREET' },
     { path: '/api-docs', label: 'Agent API' },
+    { path: '/test-lab', label: 'Test Lab' },
     { path: '/admin', label: 'Admin' },
   ];
 
@@ -78,6 +80,7 @@ export default function App() {
             <Route path="/api-docs" element={<AgentAPI />} />
             <Route path="/loan/:id" element={<LoanDetails />} />
             <Route path="/option/:id" element={<OptionDetails />} />
+            <Route path="/test-lab" element={<TestLab />} />
             <Route path="/admin" element={<AdminDashboard />} />
           </Routes>
         </main>

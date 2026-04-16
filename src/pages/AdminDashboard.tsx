@@ -69,7 +69,7 @@ function SectionHeader({ title, children }: { title: string; children?: ReactNod
 
 function ContractHealthPanel() {
   const contracts = [
-    { label: 'ClawToken ($CLAW)', address: CONTRACT_ADDRESSES.CLAW_TOKEN },
+    { label: 'ClawToken ($STREET)', address: CONTRACT_ADDRESSES.CLAW_TOKEN },
     { label: 'Staking', address: CONTRACT_ADDRESSES.STAKING },
     { label: 'Loan Engine', address: CONTRACT_ADDRESSES.LOAN_ENGINE },
     { label: 'Call Vault', address: CONTRACT_ADDRESSES.CALL_VAULT },
@@ -157,13 +157,13 @@ function ProtocolStatsPanel() {
           sub="all-time"
         />
         <StatCard
-          label="CLAW Staked"
+          label="STREET Staked"
           value={totalStaked !== undefined ? parseFloat(formatUnits(totalStaked as bigint, 18)).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—'}
           sub="tokens"
           accent
         />
         <StatCard
-          label="CLAW Supply"
+          label="STREET Supply"
           value={clawSupply !== undefined ? parseFloat(formatUnits(clawSupply as bigint, 18)).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—'}
           sub="/ 100,000,000 max"
         />
@@ -238,11 +238,11 @@ function WalletPanel() {
           <code className="text-gray-200 text-xs">{address?.slice(0, 8)}…{address?.slice(-6)}</code>
         </div>
         <div className="flex justify-between">
-          <span className="text-gray-400">CLAW Balance</span>
+          <span className="text-gray-400">$STREET Balance</span>
           <span className="text-white">{clawBalance !== undefined ? parseFloat(formatUnits(clawBalance as bigint, 18)).toLocaleString() : '—'}</span>
         </div>
         <div className="flex justify-between">
-          <span className="text-gray-400">CLAW Staked</span>
+          <span className="text-gray-400">$STREET Staked</span>
           <span className="text-white">{pos ? parseFloat(formatUnits(pos[0], 18)).toLocaleString() : '—'}</span>
         </div>
         <div className="flex justify-between">
@@ -267,11 +267,11 @@ function WalletPanel() {
 // ─── Test agent registry ──────────────────────────────────────────────────────
 
 const DEMO_AGENTS: AgentRow[] = [
-  { name: 'LiquidityAgent_Alpha', address: '', role: 'Market Maker' },
-  { name: 'ArbitrageAgent_Beta',  address: '', role: 'Arbitrageur' },
-  { name: 'LendingAgent_Gamma',   address: '', role: 'Lender' },
-  { name: 'BorrowerAgent_Delta',  address: '', role: 'Borrower' },
-  { name: 'HedgeAgent_Epsilon',   address: '', role: 'Options Writer' },
+  { name: 'LiquidityAgent_Alpha', address: '0xD1E84c88734013613230678B8E000dE53e4957dC', role: 'Market Maker' },
+  { name: 'ArbitrageAgent_Beta',  address: '0xBaf9d5E05d82bEA9B971B54AD148904ae25876b2', role: 'Arbitrageur' },
+  { name: 'LendingAgent_Gamma',   address: '0x37D57004FdeBd029d9fcB1Cc88e275fEafA89353', role: 'Lender' },
+  { name: 'BorrowerAgent_Delta',  address: '0x5159345B9944Ab14D05c18853923070D3EBF60ad', role: 'Borrower' },
+  { name: 'HedgeAgent_Epsilon',   address: '0x4EED792404bbC7bC98648EbE653E38995B8e3DfB', role: 'Options Writer' },
 ];
 
 function AgentRegistryPanel() {

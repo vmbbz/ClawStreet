@@ -1,10 +1,12 @@
-import { useState, useEffect } from 'react';
-import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract, useReadContracts } from 'wagmi';
+import { useState, useEffect, useRef } from 'react';
+import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContracts } from 'wagmi';
 import { parseUnits, formatUnits } from 'viem';
 import { Modal } from '../components/Modal';
 import { CONTRACT_ADDRESSES, clawTokenABI, clawStreetStakingABI } from '../config/contracts';
 
-type Step = 'idle' | 'approving' | 'staking' | 'success';
+const BASESCAN_TX = 'https://sepolia.basescan.org/tx/';
+
+type Step = 'idle' | 'approving' | 'staking' | 'success' | 'error';
 
 export default function Staking() {
   const { address } = useAccount();
@@ -12,6 +14,10 @@ export default function Staking() {
   const [isClaimModalOpen, setIsClaimModalOpen] = useState(false);
   const [amount, setAmount] = useState('');
   const [step, setStep] = useState<Step>('idle');
+  const [txError, setTxError] = useState<string | null>(null);
+
+  // Keep a stable ref to amountWei so the approval→stake effect never uses a stale closure
+  const amountWeiRef = useRef<bigint>(0n);
 
   // ── Contract reads ──────────────────────────────────────────────────────────
   const { data: reads, refetch: refetchReads } = useReadContracts({
@@ -69,25 +75,42 @@ export default function Staking() {
   const hasPass      = position?.[4] ?? false;
 
   const amountWei = amount ? parseUnits(amount, 18) : 0n;
+  // Keep ref in sync so effects always have the current value
+  amountWeiRef.current = amountWei;
+
   const needsApproval = clawAllowance < amountWei;
 
   // ── Approve ─────────────────────────────────────────────────────────────────
   const { writeContract: approve, isPending: isApproving, data: approveTxHash } = useWriteContract();
-  const { isLoading: isApproveConfirming, isSuccess: isApproveSuccess } = useWaitForTransactionReceipt({ hash: approveTxHash });
+  const {
+    isLoading: isApproveConfirming,
+    isSuccess: isApproveSuccess,
+    isError: isApproveError,
+    error: approveError,
+  } = useWaitForTransactionReceipt({ hash: approveTxHash });
 
   // ── Stake ───────────────────────────────────────────────────────────────────
   const { writeContract: stakeTokens, isPending: isStaking, data: stakeTxHash } = useWriteContract();
-  const { isLoading: isStakeConfirming, isSuccess: isStakeSuccess } = useWaitForTransactionReceipt({ hash: stakeTxHash });
+  const {
+    isLoading: isStakeConfirming,
+    isSuccess: isStakeSuccess,
+    isError: isStakeError,
+    error: stakeError,
+  } = useWaitForTransactionReceipt({ hash: stakeTxHash });
 
   // ── Claim revenue ───────────────────────────────────────────────────────────
   const { writeContract: claimRev, isPending: isClaiming, data: claimTxHash } = useWriteContract();
-  const { isLoading: isClaimConfirming, isSuccess: isClaimSuccess } = useWaitForTransactionReceipt({ hash: claimTxHash });
+  const {
+    isLoading: isClaimConfirming,
+    isSuccess: isClaimSuccess,
+    isError: isClaimError,
+  } = useWaitForTransactionReceipt({ hash: claimTxHash });
 
   // ── Unstake ─────────────────────────────────────────────────────────────────
   const { writeContract: unstake, isPending: isUnstaking, data: unstakeTxHash } = useWriteContract();
   const { isSuccess: isUnstakeSuccess } = useWaitForTransactionReceipt({ hash: unstakeTxHash });
 
-  // Advance step after approval confirms
+  // ── After approval: auto-submit stake ──────────────────────────────────────
   useEffect(() => {
     if (isApproveSuccess && step === 'approving') {
       setStep('staking');
@@ -95,26 +118,48 @@ export default function Staking() {
         address: CONTRACT_ADDRESSES.STAKING,
         abi: clawStreetStakingABI,
         functionName: 'stake',
-        args: [amountWei],
+        args: [amountWeiRef.current],
       });
     }
-  }, [isApproveSuccess]);
+  }, [isApproveSuccess, step, stakeTokens]);
 
+  // ── Stake confirmed ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (isStakeSuccess) {
       setStep('success');
       refetchReads();
     }
-  }, [isStakeSuccess]);
+  }, [isStakeSuccess, refetchReads]);
+
+  // ── Error handling — any tx failure resets to error state ──────────────────
+  useEffect(() => {
+    if (isApproveError && step === 'approving') {
+      const msg = approveError?.message?.slice(0, 120) ?? 'Approval transaction failed';
+      setTxError(msg);
+      setStep('error');
+    }
+  }, [isApproveError, step, approveError]);
 
   useEffect(() => {
-    if (isClaimSuccess || isUnstakeSuccess) {
-      refetchReads();
+    if (isStakeError && step === 'staking') {
+      const msg = stakeError?.message?.slice(0, 120) ?? 'Stake transaction failed';
+      setTxError(msg);
+      setStep('error');
     }
-  }, [isClaimSuccess, isUnstakeSuccess]);
+  }, [isStakeError, step, stakeError]);
+
+  // ── Claim / unstake effects ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (isClaimSuccess || isUnstakeSuccess) refetchReads();
+  }, [isClaimSuccess, isUnstakeSuccess, refetchReads]);
+
+  useEffect(() => {
+    if (isClaimError) setIsClaimModalOpen(false);
+  }, [isClaimError]);
 
   const handleStakeConfirm = () => {
     if (!address || !amountWei) return;
+    setTxError(null);
 
     if (needsApproval) {
       setStep('approving');
@@ -151,27 +196,37 @@ export default function Staking() {
     });
   };
 
+  const closeStakeModal = () => {
+    setIsStakeModalOpen(false);
+    setStep('idle');
+    setTxError(null);
+  };
+
   const isBusy = isApproving || isApproveConfirming || isStaking || isStakeConfirming;
 
   const lockDays = lockLeft > 0n ? Math.ceil(Number(lockLeft) / 86400) : 0;
 
   const stepLabel =
-    step === 'approving' || isApproving || isApproveConfirming ? 'Approving…' :
-    step === 'staking'   || isStaking  || isStakeConfirming   ? 'Staking…'   :
+    step === 'error'   ? 'Transaction Failed' :
     step === 'success' ? 'Staked!' :
+    isApproving || isApproveConfirming ? 'Approving…' :
+    isStaking   || isStakeConfirming   ? 'Staking…'   :
     needsApproval ? 'Approve & Stake' : 'Stake & Mint Pass';
+
+  // Which tx hash to show in the modal (most recent one)
+  const activeTxHash = stakeTxHash ?? approveTxHash;
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-20 text-center">
       <div className="mb-12">
         <span className="text-6xl mb-6 block drop-shadow-[0_0_15px_rgba(0,82,255,0.5)]">🦞</span>
-        <h1 className="text-4xl md:text-5xl font-extrabold mb-4 text-white tracking-tight">Stake $CLAW</h1>
+        <h1 className="text-4xl md:text-5xl font-extrabold mb-4 text-white tracking-tight">Stake $STREET</h1>
         <p className="text-lg text-gray-400 max-w-2xl mx-auto">
           Lock your tokens to mint a ClawStreet Pass NFT. Earn protocol revenue, govern the street, and get priority OTC matching.
         </p>
       </div>
 
-      {/* ── Active Position Card (if staked) ── */}
+      {/* ── Active Position Card ── */}
       {address && stakedAmount > 0n && (
         <div className="bg-cyber-surface p-6 rounded-2xl border border-lobster-orange/30 shadow-[0_0_30px_rgba(255,90,0,0.08)] max-w-md mx-auto mb-8 text-left">
           <div className="flex items-center justify-between mb-4">
@@ -185,7 +240,7 @@ export default function Staking() {
           <div className="space-y-2 text-sm mb-5">
             <div className="flex justify-between">
               <span className="text-gray-400">Staked</span>
-              <span className="text-white font-mono font-bold">{formatUnits(stakedAmount, 18)} CLAW</span>
+              <span className="text-white font-mono font-bold">{formatUnits(stakedAmount, 18)} $STREET</span>
             </div>
             <div className="flex justify-between">
               <span className="text-gray-400">Pending Revenue</span>
@@ -228,7 +283,7 @@ export default function Staking() {
         <div className="flex justify-between text-xs text-gray-400 mb-2 uppercase tracking-wider font-semibold">
           <span>Available Balance</span>
           <span className="font-mono text-white">
-            {address ? `${Number(formatUnits(clawBalance, 18)).toLocaleString()} CLAW` : '—'}
+            {address ? `${Number(formatUnits(clawBalance, 18)).toLocaleString()} $STREET` : '—'}
           </span>
         </div>
 
@@ -259,7 +314,7 @@ export default function Staking() {
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-gray-400">Total Protocol Staked</span>
-            <span className="text-white font-mono">{Number(formatUnits(totalStaked, 18)).toLocaleString()} CLAW</span>
+            <span className="text-white font-mono">{Number(formatUnits(totalStaked, 18)).toLocaleString()} $STREET</span>
           </div>
           <div className="flex justify-between text-sm pt-3 border-t border-cyber-border">
             <span className="text-gray-400">You Receive</span>
@@ -273,7 +328,7 @@ export default function Staking() {
           </div>
         ) : (
           <button
-            onClick={() => { setStep('idle'); setIsStakeModalOpen(true); }}
+            onClick={() => { setStep('idle'); setTxError(null); setIsStakeModalOpen(true); }}
             disabled={!amount || Number(amount) <= 0 || isBusy}
             className="w-full py-3.5 bg-base-blue text-white rounded-xl font-bold text-sm hover:bg-base-dark transition-colors shadow-lg shadow-base-blue/20 disabled:opacity-50"
           >
@@ -283,36 +338,113 @@ export default function Staking() {
       </div>
 
       {/* ── Stake Confirm Modal ── */}
-      <Modal isOpen={isStakeModalOpen} onClose={() => { setIsStakeModalOpen(false); setStep('idle'); }} title="Confirm Staking">
+      <Modal isOpen={isStakeModalOpen} onClose={closeStakeModal} title="Confirm Staking">
         <div className="space-y-4">
-          <p className="text-sm text-gray-400">
-            You are about to stake <strong className="text-white">{amount} $CLAW</strong> for 30 days.
-            In return, you will{hasPass ? ' top up your position and' : ''} mint a ClawStreet Pass NFT.
-          </p>
-          {needsApproval && step === 'idle' && (
-            <p className="text-xs text-yellow-400 bg-yellow-400/5 border border-yellow-400/20 rounded-lg p-3">
-              Step 1 of 2: You'll first approve $CLAW spend, then confirm the stake.
-            </p>
-          )}
-          {step === 'success' ? (
-            <div className="text-center py-2">
-              <div className="text-green-400 font-bold text-lg mb-1">Staked!</div>
-              <p className="text-xs text-gray-400">Your ClawPass NFT has been minted.</p>
+
+          {/* Error state */}
+          {step === 'error' && (
+            <div className="space-y-3">
+              <div className="flex items-start gap-3 p-3 bg-red-500/5 border border-red-500/20 rounded-lg">
+                <span className="text-red-400 text-lg leading-none">✗</span>
+                <div>
+                  <p className="text-sm font-semibold text-red-400 mb-1">Transaction Failed</p>
+                  <p className="text-xs text-gray-400">{txError}</p>
+                </div>
+              </div>
+              {activeTxHash && (
+                <a
+                  href={`${BASESCAN_TX}${activeTxHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-center text-xs text-base-blue hover:underline"
+                >
+                  View on Basescan ↗
+                </a>
+              )}
               <button
-                onClick={() => { setIsStakeModalOpen(false); setStep('idle'); setAmount(''); }}
-                className="mt-4 w-full py-2.5 bg-base-blue text-white rounded-lg font-medium text-sm"
+                onClick={closeStakeModal}
+                className="w-full py-2.5 bg-white/5 text-gray-300 border border-white/10 rounded-lg font-medium text-sm hover:bg-white/10 transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
+
+          {/* Success state */}
+          {step === 'success' && (
+            <div className="text-center py-2 space-y-2">
+              <div className="text-green-400 font-bold text-lg">Staked! 🦞</div>
+              <p className="text-xs text-gray-400">Your ClawPass NFT has been minted.</p>
+              {stakeTxHash && (
+                <a
+                  href={`${BASESCAN_TX}${stakeTxHash}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="block text-xs text-base-blue hover:underline"
+                >
+                  View transaction ↗
+                </a>
+              )}
+              <button
+                onClick={() => { closeStakeModal(); setAmount(''); }}
+                className="mt-2 w-full py-2.5 bg-base-blue text-white rounded-lg font-medium text-sm"
               >
                 Done
               </button>
             </div>
-          ) : (
-            <button
-              onClick={handleStakeConfirm}
-              disabled={isBusy}
-              className="w-full py-2.5 bg-base-blue text-white rounded-lg font-medium text-sm hover:bg-base-dark transition-colors disabled:opacity-50"
-            >
-              {stepLabel}
-            </button>
+          )}
+
+          {/* Idle / confirming state */}
+          {step !== 'success' && step !== 'error' && (
+            <>
+              <p className="text-sm text-gray-400">
+                You are about to stake <strong className="text-white">{amount} $STREET</strong> for 30 days.
+                In return, you will{hasPass ? ' top up your position and' : ''} mint a ClawStreet Pass NFT.
+              </p>
+
+              {needsApproval && step === 'idle' && (
+                <p className="text-xs text-yellow-400 bg-yellow-400/5 border border-yellow-400/20 rounded-lg p-3">
+                  Step 1 of 2: You'll first approve $STREET spend, then confirm the stake.
+                </p>
+              )}
+
+              {/* Progress indicator when confirming */}
+              {(isApproveConfirming || isStakeConfirming) && activeTxHash && (
+                <div className="flex items-center justify-between px-3 py-2 bg-base-blue/5 border border-base-blue/20 rounded-lg">
+                  <div className="flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-base-blue animate-pulse" />
+                    <span className="text-xs text-gray-400">
+                      {isApproveConfirming ? 'Waiting for approval…' : 'Waiting for stake…'}
+                    </span>
+                  </div>
+                  <a
+                    href={`${BASESCAN_TX}${activeTxHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs text-base-blue hover:underline shrink-0"
+                  >
+                    Basescan ↗
+                  </a>
+                </div>
+              )}
+
+              <button
+                onClick={handleStakeConfirm}
+                disabled={isBusy}
+                className="w-full py-2.5 bg-base-blue text-white rounded-lg font-medium text-sm hover:bg-base-dark transition-colors disabled:opacity-50"
+              >
+                {stepLabel}
+              </button>
+
+              {isBusy && (
+                <button
+                  onClick={closeStakeModal}
+                  className="w-full py-1.5 bg-transparent text-gray-500 text-xs hover:text-gray-400 transition-colors"
+                >
+                  Running in background — close this window
+                </button>
+              )}
+            </>
           )}
         </div>
       </Modal>

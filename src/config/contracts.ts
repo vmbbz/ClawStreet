@@ -1,14 +1,15 @@
 import { parseAbi } from 'viem';
 
-// ─── Contract addresses ───────────────────────────────────────────────────────
-// Replace with actual deployed addresses after running:
-//   forge script script/DeployClawStreet.s.sol --rpc-url base_sepolia --broadcast
+// ─── Contract addresses — Base Sepolia ───────────────────────────────────────
+// ClawToken ($STREET) + Staking redeployed 2026-04-12 for STREET symbol
 export const CONTRACT_ADDRESSES = {
-  LOAN_ENGINE:  '0x1111111111111111111111111111111111111111' as const,
-  CALL_VAULT:   '0x2222222222222222222222222222222222222222' as const,
-  BUNDLE_VAULT: '0x3333333333333333333333333333333333333333' as const,
-  CLAW_TOKEN:   '0x4444444444444444444444444444444444444444' as const,
-  STAKING:      '0x5555555555555555555555555555555555555555' as const,
+  LOAN_ENGINE:  '0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c' as const,
+  CALL_VAULT:   '0x69730728a0B19b844bc18888d2317987Bc528baE' as const,
+  BUNDLE_VAULT: '0x86ef420fD3e27c3Ac896c479B19b6A840b97Bee1' as const,
+  CLAW_TOKEN:   '0xD11fC366828445B874F5202109E5f48C4D14FCe4' as const,
+  STAKING:      '0xADBf89BA38915B9CF18E0a24Ea3E27F39d920bd3' as const,
+  MOCK_USDC:    '0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A' as const,
+  MOCK_NFT:     '0x41119aAd1c69dba3934D0A061d312A52B06B27DF' as const,
 };
 
 // ─── ClawStreetLoan ABI ───────────────────────────────────────────────────────

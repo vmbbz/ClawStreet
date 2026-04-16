@@ -14,7 +14,20 @@
       "Bash(forge test:*)",
       "Bash(bash scripts/run-tests.sh)",
       "Bash(npx tsc:*)",
-      "Bash(node_modules/.bin/tsx server.ts)"
+      "Bash(node_modules/.bin/tsx server.ts)",
+      "Bash(source .env)",
+      "Bash(cast balance:*)",
+      "Bash(bash scripts/setup-agent-wallets.sh)",
+      "Bash(forge script:*)",
+      "Bash(sed -i 's|0x4620fCf531A72EC24af9325dD1Fa476A59Bd7b9e|0xD11fC366828445B874F5202109E5f48C4D14FCe4|g' config/base-sepolia.json)",
+      "Bash(sed -i 's|\"\"symbol\"\": \"\"CLAW\"\"|\"\"symbol\"\": \"\"STREET\"\"|g' config/base-sepolia.json)",
+      "Bash(sed -i 's|\\\\$CLAW governance|\\\\$STREET governance|g' config/base-sepolia.json)",
+      "Bash(sed -i 's|^CLAW_TOKEN_ADDRESS=.*|CLAW_TOKEN_ADDRESS=0xD11fC366828445B874F5202109E5f48C4D14FCe4|' .env)",
+      "Bash(sed -i 's|^STAKING_ADDRESS=.*|STAKING_ADDRESS=0xADBf89BA38915B9CF18E0a24Ea3E27F39d920bd3|' .env)",
+      "Bash(cast call:*)",
+      "Bash(cast send:*)",
+      "Bash(cast nonce:*)",
+      "Bash(TOKEN=\"0xD11fC366828445B874F5202109E5f48C4D14FCe4\")"
     ]
   }
 }
