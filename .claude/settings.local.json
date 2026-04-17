@@ -45,7 +45,12 @@
       "Bash(printf '# Keep the logs/ directory in git but ignore generated content\\\\n# status.json and latest.json are ephemeral runtime state\\\\nstatus.json\\\\nlatest.json\\\\n# Cycle reports are local audit trail — not committed\\\\nreports/\\\\n# Seed script run logs\\\\n*.log\\\\n')",
       "Bash(\"c:/Users/cosyc/ClawStreet/logs/.gitignore\")",
       "Bash(grep -c \"fromBlock: ''earliest''\" src/pages/OptionDetails.tsx src/pages/Profile.tsx)",
-      "Bash(npx plugins:*)"
+      "Bash(npx plugins:*)",
+      "Bash(vercel --version)",
+      "Bash(vercel whoami:*)",
+      "Bash(vercel link:*)",
+      "Bash(vercel --prod)",
+      "Bash(find /c/Users/cosyc/ClawStreet/contracts -type f -name *.sol)"
     ]
   }
 }

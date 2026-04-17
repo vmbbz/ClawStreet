@@ -8,7 +8,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
   useWriteContract, useReadContract, useReadContracts, useAccount,
-  useWaitForTransactionReceipt,
+  useWaitForTransactionReceipt, useSignMessage,
 } from 'wagmi';
 import { parseUnits, formatUnits } from 'viem';
 import {
@@ -21,8 +21,106 @@ import { SkeletonGrid } from '../components/SkeletonCard';
 import { toast } from '../components/Toast';
 import {
   AlertCircle, Package, TrendingUp, ShieldCheck,
-  User, ChevronDown, Filter, Plus, Copy, Check, Zap, Droplets,
+  User, ChevronDown, Filter, Plus, Copy, Check, Zap, Droplets, MessageSquare,
 } from 'lucide-react';
+
+// ─── Bargain Modal ─────────────────────────────────────────────────────────────
+
+function BargainModal({
+  isOpen, onClose,
+  dealType, dealId, dealOwner, address,
+  currentTermLabel,   // e.g. "Interest: 75 USDC" or "Premium: 50 USDC"
+  termKey,            // 'interestRate' | 'premium'
+  termLabel,          // label shown in form
+}: {
+  isOpen: boolean; onClose: () => void;
+  dealType: 'loan' | 'option'; dealId: number;
+  dealOwner: string; address?: string;
+  currentTermLabel: string; termKey: 'interestRate' | 'premium'; termLabel: string;
+}) {
+  const { signMessageAsync } = useSignMessage();
+  const [value, setValue]   = useState('');
+  const [msg, setMsg]       = useState('');
+  const [busy, setBusy]     = useState(false);
+
+  async function handleSubmit() {
+    if (!address || !value) return;
+    setBusy(true);
+    try {
+      const timestamp    = Math.floor(Date.now() / 1000);
+      const proposedTerms = { [termKey]: Number(value), message: msg || undefined };
+      const message = [
+        'ClawStreet Negotiation Offer',
+        `DealType: ${dealType}`,
+        `DealId: ${dealId}`,
+        `Terms: ${JSON.stringify(proposedTerms)}`,
+        `Timestamp: ${timestamp}`,
+      ].join('\n');
+
+      const signature = await signMessageAsync({ account: address as `0x${string}`, message });
+
+      const res = await fetch('/api/negotiate/offer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: address, to: dealOwner, dealType, dealId, proposedTerms, timestamp, signature }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success('Offer submitted! The deal creator has been notified.');
+        onClose();
+      } else {
+        toast.error(data.error ?? 'Offer failed');
+      }
+    } catch (e: any) {
+      if (e?.code !== 4001) toast.error(e?.message ?? 'Failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} title={`Propose Terms — ${dealType === 'loan' ? 'Loan' : 'Option'} #${dealId}`}>
+      <div className="space-y-4">
+        <p className="text-sm text-gray-400">
+          Current: <span className="text-white">{currentTermLabel}</span>. Propose different terms — the deal creator will be notified.
+        </p>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1 uppercase tracking-wider">{termLabel} *</label>
+          <input
+            value={value}
+            onChange={e => setValue(e.target.value)}
+            type="number"
+            placeholder="e.g. 50"
+            className="w-full bg-cyber-bg border border-cyber-border rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-base-blue/50"
+          />
+        </div>
+        <div>
+          <label className="block text-xs text-gray-500 mb-1 uppercase tracking-wider">Message <span className="normal-case text-gray-600">(optional, max 280 chars)</span></label>
+          <textarea
+            value={msg}
+            onChange={e => setMsg(e.target.value.slice(0, 280))}
+            rows={2}
+            placeholder="Why should they accept your offer?"
+            className="w-full bg-cyber-bg border border-cyber-border rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-base-blue/50 resize-none"
+          />
+        </div>
+        <div className="flex gap-3 pt-1">
+          <button
+            onClick={handleSubmit}
+            disabled={busy || !value || !address}
+            className="flex-1 py-2.5 bg-base-blue text-white rounded-lg font-semibold text-sm hover:bg-blue-500 disabled:opacity-40 transition-colors"
+          >
+            {busy ? 'Signing...' : 'Sign & Submit Offer'}
+          </button>
+          <button onClick={onClose} className="px-4 py-2.5 bg-cyber-bg border border-cyber-border text-gray-400 rounded-lg text-sm hover:text-white transition-colors">
+            Cancel
+          </button>
+        </div>
+        {!address && <p className="text-xs text-yellow-500">Connect wallet to make an offer.</p>}
+      </div>
+    </Modal>
+  );
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -346,6 +444,7 @@ function CopyAddress({ addr }: { addr: string }) {
 
 function LoanCard({ id, isMock, address, myDeals, activeOnly }: { id: number; isMock: boolean; address?: string; myDeals?: boolean; activeOnly?: boolean }) {
   const [isFundModalOpen, setIsFundModalOpen] = useState(false);
+  const [isBargainOpen, setIsBargainOpen] = useState(false);
 
   const { data: loanData } = useReadContract({
     address: CONTRACT_ADDRESSES.LOAN_ENGINE,
@@ -548,9 +647,20 @@ function LoanCard({ id, isMock, address, myDeals, activeOnly }: { id: number; is
             Details
           </Link>
           {displayData.loanStatus === 'open' && (
-            <button onClick={() => setIsFundModalOpen(true)} className="flex-1 py-2 bg-white text-black rounded-lg font-semibold text-xs hover:bg-gray-200 transition-colors">
-              Fund Loan
-            </button>
+            <>
+              <button onClick={() => setIsFundModalOpen(true)} className="flex-1 py-2 bg-white text-black rounded-lg font-semibold text-xs hover:bg-gray-200 transition-colors">
+                Fund Loan
+              </button>
+              {!isMock && address && address.toLowerCase() !== displayData.borrower?.toLowerCase() && (
+                <button
+                  onClick={() => setIsBargainOpen(true)}
+                  title="Propose different terms"
+                  className="px-2.5 py-2 bg-cyber-bg border border-cyber-border text-gray-500 hover:text-base-blue hover:border-base-blue/40 rounded-lg text-xs transition-colors"
+                >
+                  <MessageSquare size={13} />
+                </button>
+              )}
+            </>
           )}
           {displayData.loanStatus === 'funded' && (
             <span className="flex-1 py-2 bg-blue-500/10 text-blue-400 border border-blue-500/20 rounded-lg font-semibold text-xs text-center">Active Loan</span>
@@ -559,6 +669,19 @@ function LoanCard({ id, isMock, address, myDeals, activeOnly }: { id: number; is
             <span className="flex-1 py-2 bg-cyber-border text-gray-500 rounded-lg font-semibold text-xs text-center cursor-not-allowed">Closed</span>
           )}
         </div>
+        {!isMock && isBargainOpen && (
+          <BargainModal
+            isOpen={isBargainOpen}
+            onClose={() => setIsBargainOpen(false)}
+            dealType="loan"
+            dealId={id}
+            dealOwner={displayData.borrower ?? ''}
+            address={address}
+            currentTermLabel={`Interest: ${displayData.interest} USDC`}
+            termKey="interestRate"
+            termLabel="Proposed Interest (USDC)"
+          />
+        )}
 
         <Modal isOpen={isFundModalOpen} onClose={() => setIsFundModalOpen(false)} title="Confirm Funding">
           <div className="space-y-4">
@@ -587,6 +710,7 @@ function LoanCard({ id, isMock, address, myDeals, activeOnly }: { id: number; is
 
 function OptionCard({ id, isMock, address, myDeals, activeOnly }: { id: number; isMock: boolean; address?: string; myDeals?: boolean; activeOnly?: boolean }) {
   const [isBuyModalOpen, setIsBuyModalOpen] = useState(false);
+  const [isBargainOpen, setIsBargainOpen] = useState(false);
 
   const { data: optionData } = useReadContract({
     address: CONTRACT_ADDRESSES.CALL_VAULT,
@@ -746,14 +870,38 @@ function OptionCard({ id, isMock, address, myDeals, activeOnly }: { id: number; 
               Details
             </Link>
             {isAvailable && !displayData.isExpired && !displayData.exercised ? (
-              <button onClick={() => setIsBuyModalOpen(true)} className="px-3 py-2 bg-white text-black rounded-lg font-semibold text-xs hover:bg-gray-200 transition-colors">
-                Buy
-              </button>
+              <>
+                <button onClick={() => setIsBuyModalOpen(true)} className="px-3 py-2 bg-white text-black rounded-lg font-semibold text-xs hover:bg-gray-200 transition-colors">
+                  Buy
+                </button>
+                {!isMock && address && address.toLowerCase() !== (typeof displayData.writer === 'string' ? displayData.writer.toLowerCase() : '') && (
+                  <button
+                    onClick={() => setIsBargainOpen(true)}
+                    title="Propose different premium"
+                    className="px-2.5 py-2 bg-cyber-bg border border-cyber-border text-gray-500 hover:text-purple-400 hover:border-purple-500/40 rounded-lg text-xs transition-colors"
+                  >
+                    <MessageSquare size={13} />
+                  </button>
+                )}
+              </>
             ) : displayData.exercised ? (
               <span className="px-3 py-2 bg-cyber-border text-gray-500 rounded-lg font-semibold text-xs cursor-not-allowed">Settled</span>
             ) : null}
           </div>
         </div>
+        {!isMock && isBargainOpen && (
+          <BargainModal
+            isOpen={isBargainOpen}
+            onClose={() => setIsBargainOpen(false)}
+            dealType="option"
+            dealId={id}
+            dealOwner={typeof displayData.writer === 'string' ? displayData.writer : ''}
+            address={address}
+            currentTermLabel={`Premium: ${displayData.premium} USDC`}
+            termKey="premium"
+            termLabel="Proposed Premium (USDC)"
+          />
+        )}
 
         <Modal isOpen={isBuyModalOpen} onClose={() => setIsBuyModalOpen(false)} title="Buy Call Option">
           <div className="space-y-4">

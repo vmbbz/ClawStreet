@@ -5,6 +5,14 @@ import { fileURLToPath } from 'url';
 import { encodeFunctionData, parseUnits } from 'viem';
 import { existsSync, readFileSync, readdirSync } from 'fs';
 import { spawn } from 'child_process';
+import {
+  verifyAndRegister, verifyAndDeregister, listAgents, getAgent, registerInternalAgent,
+} from './scripts/lib/agent-registry.js';
+import {
+  submitOffer, respondToOffer, getOffersForDeal, getOffersForAddress,
+} from './scripts/lib/negotiation-store.js';
+import { notifyAgent } from './scripts/lib/contact-notifier.js';
+import { getAddressStats } from './scripts/lib/stats-calculator.js';
 
 // ─── Faucet rate-limit (in-memory) ────────────────────────────────────────────
 // Maps lowercase address → timestamp of last claim
@@ -122,8 +130,8 @@ const callVaultAbi = [{
 }];
 
 const CONTRACT_ADDRESSES = {
-  LOAN_ENGINE: '0x1111111111111111111111111111111111111111',
-  CALL_VAULT: '0x2222222222222222222222222222222222222222',
+  LOAN_ENGINE: '0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c',
+  CALL_VAULT:  '0x69730728a0B19b844bc18888d2317987Bc528baE',
 };
 
 async function startServer() {
@@ -313,6 +321,153 @@ async function startServer() {
     } catch (error) {
       res.status(400).json({ success: false, error: String(error) });
     }
+  });
+
+  // ─── Bootstrap internal dev agents in registry ──────────────────────────
+  // These are always present — no signature needed, never expire.
+
+  const DEV_AGENTS = [
+    { address: '0xD1E84c88734013613230678B8E000dE53e4957dC', name: 'LiquidityAgent_Alpha',  role: 'Market Maker'   },
+    { address: '0xBaf9d5E05d82bEA9B971B54AD148904ae25876b2', name: 'ArbitrageAgent_Beta',   role: 'Arbitrageur'    },
+    { address: '0x37D57004FdeBd029d9fcB1Cc88e275fEafA89353', name: 'LendingAgent_Gamma',    role: 'Lender'         },
+    { address: '0x5159345B9944Ab14D05c18853923070D3EBF60ad', name: 'BorrowerAgent_Delta',   role: 'Borrower'       },
+    { address: '0x4EED792404bbC7bC98648EbE653E38995B8e3DfB', name: 'HedgeAgent_Epsilon',    role: 'Options Writer' },
+  ];
+  for (const a of DEV_AGENTS) registerInternalAgent(a);
+
+  // ─── Agent Registry API ───────────────────────────────────────────────────
+
+  // GET /api/agents — list all announced agents (internal + external)
+  app.get('/api/agents', (_req, res) => {
+    res.json(listAgents());
+  });
+
+  // GET /api/agents/:address — single agent entry
+  app.get('/api/agents/:address', (req, res) => {
+    const entry = getAgent(req.params.address);
+    if (entry) return res.json(entry);
+    res.status(404).json({ error: 'Agent not found' });
+  });
+
+  // GET /api/agents/:address/stats — on-chain performance stats (cached 60s)
+  app.get('/api/agents/:address/stats', async (req, res) => {
+    const { address } = req.params;
+    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      return res.status(400).json({ error: 'Invalid address' });
+    }
+    try {
+      const stats = await getAddressStats(address);
+      res.json(stats);
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  // POST /api/agents/announce — register or update (signed EIP-191 message)
+  app.post('/api/agents/announce', async (req, res) => {
+    const { address, name, contact, role, participantType, timestamp, signature } = req.body ?? {};
+    if (!address || !name || !role || !participantType || !timestamp || !signature) {
+      return res.status(400).json({ success: false, error: 'Missing required fields: address, name, role, participantType, timestamp, signature' });
+    }
+    const result = await verifyAndRegister({ address, name, contact: contact ?? '', role, participantType, timestamp, signature });
+    if (result.success) return res.json({ success: true, entry: getAgent(address) });
+    res.status(400).json(result);
+  });
+
+  // DELETE /api/agents/announce — sign out (signed EIP-191 message)
+  app.delete('/api/agents/announce', async (req, res) => {
+    const { address, timestamp, signature } = req.body ?? {};
+    if (!address || !timestamp || !signature) {
+      return res.status(400).json({ success: false, error: 'Missing required fields: address, timestamp, signature' });
+    }
+    const result = await verifyAndDeregister({ address, timestamp, signature });
+    if (result.success) return res.json({ success: true });
+    res.status(400).json(result);
+  });
+
+  // ─── Negotiation / Bargaining API ─────────────────────────────────────────
+
+  // GET /api/negotiate/deals/:type/:id — all offers on a specific deal
+  app.get('/api/negotiate/deals/:type/:id', (req, res) => {
+    const { type, id } = req.params;
+    if (type !== 'loan' && type !== 'option') {
+      return res.status(400).json({ error: 'type must be loan or option' });
+    }
+    const dealId = Number(id);
+    if (isNaN(dealId)) return res.status(400).json({ error: 'Invalid deal id' });
+    res.json(getOffersForDeal(type, dealId));
+  });
+
+  // GET /api/negotiate/my?address=0x... — all offers for an address
+  app.get('/api/negotiate/my', (req, res) => {
+    const { address } = req.query as { address?: string };
+    if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      return res.status(400).json({ error: 'Invalid or missing address query param' });
+    }
+    res.json(getOffersForAddress(address));
+  });
+
+  // POST /api/negotiate/offer — propose new terms on a deal
+  app.post('/api/negotiate/offer', async (req, res) => {
+    const { from, to, dealType, dealId, proposedTerms, timestamp, signature } = req.body ?? {};
+    if (!from || !to || !dealType || dealId === undefined || !proposedTerms || !timestamp || !signature) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+    const result = await submitOffer({ from, to, dealType, dealId: Number(dealId), proposedTerms, timestamp, signature });
+    if (!result.success) return res.status(400).json(result);
+
+    // Notify the deal owner if they have a contact URL
+    const ownerEntry = getAgent(to);
+    if (ownerEntry?.contact) {
+      notifyAgent(ownerEntry.contact, {
+        type: 'negotiation_offer',
+        offerId: result.offerId!,
+        dealType,
+        dealId: Number(dealId),
+        from,
+        proposedTerms,
+        message: proposedTerms.message,
+        timestamp: Math.floor(Date.now() / 1000),
+      });
+    }
+
+    res.json(result);
+  });
+
+  // POST /api/negotiate/respond — accept / decline / counter
+  app.post('/api/negotiate/respond', async (req, res) => {
+    const { respondingAddress, offerId, response, counterTerms, timestamp, signature } = req.body ?? {};
+    if (!respondingAddress || !offerId || !response || !timestamp || !signature) {
+      return res.status(400).json({ success: false, error: 'Missing required fields' });
+    }
+    if (!['accept', 'decline', 'counter'].includes(response)) {
+      return res.status(400).json({ success: false, error: 'response must be accept, decline, or counter' });
+    }
+    const result = await respondToOffer({ respondingAddress, offerId, response, counterTerms, timestamp, signature });
+    if (!result.success) return res.status(400).json(result);
+
+    // Notify original proposer if they have a contact URL
+    const offers = getOffersForAddress(respondingAddress);
+    const originalOffer = offers.find(o => o.id === offerId);
+    if (originalOffer) {
+      const proposerEntry = getAgent(originalOffer.from);
+      if (proposerEntry?.contact) {
+        const notifyType = response === 'accept' ? 'offer_accepted'
+          : response === 'decline' ? 'offer_declined'
+          : 'offer_countered';
+        notifyAgent(proposerEntry.contact, {
+          type: notifyType,
+          offerId,
+          dealType: originalOffer.dealType,
+          dealId: originalOffer.dealId,
+          from: respondingAddress,
+          proposedTerms: counterTerms,
+          timestamp: Math.floor(Date.now() / 1000),
+        });
+      }
+    }
+
+    res.json(result);
   });
 
   // Vite middleware for development

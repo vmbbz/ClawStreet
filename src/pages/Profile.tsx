@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { usePublicClient, useReadContracts } from 'wagmi';
+import { usePublicClient, useReadContracts, useAccount, useSignMessage } from 'wagmi';
 import { formatUnits, parseAbiItem, type Address } from 'viem';
 import { motion } from 'motion/react';
 import {
   ArrowLeft, Copy, ExternalLink, Bot, User,
-  Wallet, TrendingUp, Activity, Clock, CheckCircle2, AlertCircle
+  Wallet, TrendingUp, Activity, Clock, CheckCircle2, AlertCircle,
+  UserPlus, UserMinus, RefreshCw,
 } from 'lucide-react';
+import { toast } from '../components/Toast';
 import {
   CONTRACT_ADDRESSES, clawStreetLoanABI, clawStreetCallVaultABI,
   clawTokenABI, clawStreetStakingABI, erc20ABI,
@@ -49,108 +51,149 @@ async function fetchAddressEvents(
 ): Promise<DealEvent[]> {
   if (!publicClient) return [];
   const events: DealEvent[] = [];
+  const seen = new Set<string>(); // deduplicate by txHash
 
   try {
-    // Use a recent block window — public RPC limits getLogs to 10,000 blocks
     const currentBlock = await publicClient.getBlockNumber();
-    const fromBlock = currentBlock > 9500n ? currentBlock - 9500n : 0n;
 
-    // Loan events (borrower = creator)
-    const loanCreated = await publicClient.getLogs({
-      address: CONTRACT_ADDRESSES.LOAN_ENGINE,
-      event: parseAbiItem('event LoanCreated(uint256 indexed loanId, address indexed borrower, uint256 principal, uint256 health)'),
-      args: { borrower: address },
-      fromBlock,
-    });
-    for (const log of loanCreated) {
-      const block = await publicClient.getBlock({ blockHash: log.blockHash as `0x${string}` });
-      events.push({
-        type: 'LoanCreated',
-        id: log.args.loanId?.toString() ?? '?',
-        txHash: log.transactionHash ?? '',
-        blockNumber: log.blockNumber ?? 0n,
-        timestamp: Number(block.timestamp) * 1000,
-        detail: `Created loan #${log.args.loanId} — ${formatUnits(log.args.principal ?? 0n, 6)} USDC`,
-      });
+    // Public RPC limits eth_getLogs to 10,000 blocks.
+    // We scan 3 consecutive 9,500-block windows (~14 hours of history on Base Sepolia
+    // at ~2s/block) to catch older agent transactions that have drifted out of the
+    // most-recent window.
+    const WINDOW = 9_500n;
+    const windows: { fromBlock: bigint; toBlock: bigint }[] = [];
+    for (let i = 0; i < 3; i++) {
+      const toBlock   = currentBlock - BigInt(i) * WINDOW;
+      const fromBlock = toBlock > WINDOW ? toBlock - WINDOW : 0n;
+      if (toBlock >= fromBlock) windows.push({ fromBlock, toBlock });
     }
 
-    // Loan accepted (lender)
-    const loanAccepted = await publicClient.getLogs({
-      address: CONTRACT_ADDRESSES.LOAN_ENGINE,
-      event: parseAbiItem('event LoanAccepted(uint256 indexed loanId, address indexed lender)'),
-      args: { lender: address },
-      fromBlock,
-    });
-    for (const log of loanAccepted) {
-      const block = await publicClient.getBlock({ blockHash: log.blockHash as `0x${string}` });
-      events.push({
-        type: 'LoanAccepted',
-        id: log.args.loanId?.toString() ?? '?',
-        txHash: log.transactionHash ?? '',
-        blockNumber: log.blockNumber ?? 0n,
-        timestamp: Number(block.timestamp) * 1000,
-        detail: `Funded loan #${log.args.loanId}`,
-      });
+    for (const { fromBlock, toBlock } of windows) {
+      try {
+        // Loan events (borrower = creator)
+        const loanCreated = await publicClient.getLogs({
+          address: CONTRACT_ADDRESSES.LOAN_ENGINE,
+          event: parseAbiItem('event LoanCreated(uint256 indexed loanId, address indexed borrower, uint256 principal, uint256 health)'),
+          args: { borrower: address },
+          fromBlock,
+          toBlock,
+        });
+        for (const log of loanCreated) {
+          const key = log.transactionHash ?? `${log.blockNumber}-lc-${log.args.loanId}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const block = await publicClient.getBlock({ blockHash: log.blockHash as `0x${string}` });
+          events.push({
+            type: 'LoanCreated',
+            id: log.args.loanId?.toString() ?? '?',
+            txHash: log.transactionHash ?? '',
+            blockNumber: log.blockNumber ?? 0n,
+            timestamp: Number(block.timestamp) * 1000,
+            detail: `Created loan #${log.args.loanId} — ${formatUnits(log.args.principal ?? 0n, 6)} USDC`,
+          });
+        }
+
+        // Loan accepted (lender)
+        const loanAccepted = await publicClient.getLogs({
+          address: CONTRACT_ADDRESSES.LOAN_ENGINE,
+          event: parseAbiItem('event LoanAccepted(uint256 indexed loanId, address indexed lender)'),
+          args: { lender: address },
+          fromBlock,
+          toBlock,
+        });
+        for (const log of loanAccepted) {
+          const key = log.transactionHash ?? `${log.blockNumber}-la-${log.args.loanId}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const block = await publicClient.getBlock({ blockHash: log.blockHash as `0x${string}` });
+          events.push({
+            type: 'LoanAccepted',
+            id: log.args.loanId?.toString() ?? '?',
+            txHash: log.transactionHash ?? '',
+            blockNumber: log.blockNumber ?? 0n,
+            timestamp: Number(block.timestamp) * 1000,
+            detail: `Funded loan #${log.args.loanId}`,
+          });
+        }
+
+        // Options written
+        const optionWritten = await publicClient.getLogs({
+          address: CONTRACT_ADDRESSES.CALL_VAULT,
+          event: parseAbiItem('event OptionWritten(uint256 indexed optionId, address indexed writer, uint256 amount, uint256 strike, uint256 premium)'),
+          args: { writer: address },
+          fromBlock,
+          toBlock,
+        });
+        for (const log of optionWritten) {
+          const key = log.transactionHash ?? `${log.blockNumber}-ow-${log.args.optionId}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const block = await publicClient.getBlock({ blockHash: log.blockHash as `0x${string}` });
+          events.push({
+            type: 'OptionWritten',
+            id: log.args.optionId?.toString() ?? '?',
+            txHash: log.transactionHash ?? '',
+            blockNumber: log.blockNumber ?? 0n,
+            timestamp: Number(block.timestamp) * 1000,
+            detail: `Wrote call option #${log.args.optionId} — strike ${formatUnits(log.args.strike ?? 0n, 6)} USDC`,
+          });
+        }
+
+        // Options bought
+        const optionBought = await publicClient.getLogs({
+          address: CONTRACT_ADDRESSES.CALL_VAULT,
+          event: parseAbiItem('event OptionBought(uint256 indexed optionId, address indexed buyer)'),
+          args: { buyer: address },
+          fromBlock,
+          toBlock,
+        });
+        for (const log of optionBought) {
+          const key = log.transactionHash ?? `${log.blockNumber}-ob-${log.args.optionId}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const block = await publicClient.getBlock({ blockHash: log.blockHash as `0x${string}` });
+          events.push({
+            type: 'OptionBought',
+            id: log.args.optionId?.toString() ?? '?',
+            txHash: log.transactionHash ?? '',
+            blockNumber: log.blockNumber ?? 0n,
+            timestamp: Number(block.timestamp) * 1000,
+            detail: `Bought option #${log.args.optionId}`,
+          });
+        }
+
+        // Staking
+        const staked = await publicClient.getLogs({
+          address: CONTRACT_ADDRESSES.STAKING,
+          event: parseAbiItem('event Staked(address indexed staker, uint256 amount, uint256 totalStaked)'),
+          args: { staker: address },
+          fromBlock,
+          toBlock,
+        });
+        for (const log of staked) {
+          const key = log.transactionHash ?? `${log.blockNumber}-st`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          const block = await publicClient.getBlock({ blockHash: log.blockHash as `0x${string}` });
+          events.push({
+            type: 'Staked',
+            id: '—',
+            txHash: log.transactionHash ?? '',
+            blockNumber: log.blockNumber ?? 0n,
+            timestamp: Number(block.timestamp) * 1000,
+            detail: `Staked ${formatUnits(log.args.amount ?? 0n, 18)} STREET`,
+          });
+        }
+      } catch (windowErr) {
+        // One window failing (e.g. RPC gap) shouldn't abort the whole fetch
+        console.warn('Profile: window fetch error', windowErr);
+      }
     }
 
-    // Options written
-    const optionWritten = await publicClient.getLogs({
-      address: CONTRACT_ADDRESSES.CALL_VAULT,
-      event: parseAbiItem('event OptionWritten(uint256 indexed optionId, address indexed writer, uint256 amount, uint256 strike, uint256 premium)'),
-      args: { writer: address },
-      fromBlock,
+    events.sort((a, b) => {
+      const diff = b.blockNumber - a.blockNumber;
+      return diff > 0n ? 1 : diff < 0n ? -1 : 0;
     });
-    for (const log of optionWritten) {
-      const block = await publicClient.getBlock({ blockHash: log.blockHash as `0x${string}` });
-      events.push({
-        type: 'OptionWritten',
-        id: log.args.optionId?.toString() ?? '?',
-        txHash: log.transactionHash ?? '',
-        blockNumber: log.blockNumber ?? 0n,
-        timestamp: Number(block.timestamp) * 1000,
-        detail: `Wrote call option #${log.args.optionId} — strike ${formatUnits(log.args.strike ?? 0n, 6)} USDC`,
-      });
-    }
-
-    // Options bought
-    const optionBought = await publicClient.getLogs({
-      address: CONTRACT_ADDRESSES.CALL_VAULT,
-      event: parseAbiItem('event OptionBought(uint256 indexed optionId, address indexed buyer)'),
-      args: { buyer: address },
-      fromBlock,
-    });
-    for (const log of optionBought) {
-      const block = await publicClient.getBlock({ blockHash: log.blockHash as `0x${string}` });
-      events.push({
-        type: 'OptionBought',
-        id: log.args.optionId?.toString() ?? '?',
-        txHash: log.transactionHash ?? '',
-        blockNumber: log.blockNumber ?? 0n,
-        timestamp: Number(block.timestamp) * 1000,
-        detail: `Bought option #${log.args.optionId}`,
-      });
-    }
-
-    // Staking
-    const staked = await publicClient.getLogs({
-      address: CONTRACT_ADDRESSES.STAKING,
-      event: parseAbiItem('event Staked(address indexed staker, uint256 amount, uint256 totalStaked)'),
-      args: { staker: address },
-      fromBlock,
-    });
-    for (const log of staked) {
-      const block = await publicClient.getBlock({ blockHash: log.blockHash as `0x${string}` });
-      events.push({
-        type: 'Staked',
-        id: '—',
-        txHash: log.transactionHash ?? '',
-        blockNumber: log.blockNumber ?? 0n,
-        timestamp: Number(block.timestamp) * 1000,
-        detail: `Staked ${formatUnits(log.args.amount ?? 0n, 18)} STREET`,
-      });
-    }
-
-    events.sort((a, b) => Number(b.blockNumber) - Number(a.blockNumber));
   } catch (e) {
     console.error('Profile event fetch error:', e);
   }
@@ -194,10 +237,194 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
   );
 }
 
+// ─── Announce Panel (own profile only) ────────────────────────────────────────
+
+const VALID_ANNOUNCE_ROLES = ['Market Maker', 'Lender', 'Borrower', 'Options Writer', 'Arbitrageur'] as const;
+
+function AnnouncePanel({ address }: { address: string }) {
+  const { signMessageAsync } = useSignMessage();
+  const [open, setOpen]     = useState(false);
+  const [registered, setRegistered] = useState<{ name: string } | null>(null);
+  const [form, setForm]     = useState({
+    name: '', role: 'Lender', contact: '',
+    participantType: 'human' as 'agent' | 'human',
+  });
+  const [busy, setBusy] = useState(false);
+
+  // Check if already registered
+  useEffect(() => {
+    fetch(`/api/agents/${address}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(entry => {
+        if (entry && !entry.isInternal) setRegistered({ name: entry.name });
+      })
+      .catch(() => {});
+  }, [address]);
+
+  async function handleAnnounce() {
+    setBusy(true);
+    try {
+      const timestamp = Math.floor(Date.now() / 1000);
+      const message = [
+        'ClawStreet Agent Announcement',
+        `Address: ${address.toLowerCase()}`,
+        `Name: ${form.name}`,
+        `Contact: ${form.contact}`,
+        `Role: ${form.role}`,
+        `Type: ${form.participantType}`,
+        `Timestamp: ${timestamp}`,
+      ].join('\n');
+
+      const signature = await signMessageAsync({ account: address as `0x${string}`, message });
+      const res = await fetch('/api/agents/announce', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address, name: form.name, contact: form.contact, role: form.role, participantType: form.participantType, timestamp, signature }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setRegistered({ name: form.name });
+        setOpen(false);
+        toast.success('You\'re now announced in the agent registry!');
+      } else {
+        toast.error(data.error ?? 'Announcement failed');
+      }
+    } catch (e: any) {
+      if (e?.code !== 4001) toast.error(e?.message ?? 'Sign failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSignOut() {
+    setBusy(true);
+    try {
+      const timestamp = Math.floor(Date.now() / 1000);
+      const message = `ClawStreet Sign-Out\nAddress: ${address.toLowerCase()}\nTimestamp: ${timestamp}`;
+      const signature = await signMessageAsync({ account: address as `0x${string}`, message });
+      const res = await fetch('/api/agents/announce', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address, timestamp, signature }),
+      });
+      const data = await res.json();
+      if (data.success) {
+        setRegistered(null);
+        toast.success('Removed from agent registry.');
+      } else {
+        toast.error(data.error ?? 'Sign-out failed');
+      }
+    } catch (e: any) {
+      if (e?.code !== 4001) toast.error(e?.message ?? 'Sign failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (registered) {
+    return (
+      <div className="mb-6 flex items-center justify-between p-4 bg-teal-500/8 border border-teal-500/25 rounded-xl">
+        <div className="flex items-center gap-3">
+          <span className="text-teal-400 text-lg">🤖</span>
+          <div>
+            <p className="text-sm font-medium text-teal-400">Announced as <strong>{registered.name}</strong></p>
+            <p className="text-xs text-gray-500">Visible in the Agent Observatory. Re-announce within 24h to stay active.</p>
+          </div>
+        </div>
+        <button
+          onClick={handleSignOut}
+          disabled={busy}
+          className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-gray-500 hover:text-red-400 border border-gray-700 hover:border-red-500/40 rounded-lg transition-colors"
+        >
+          {busy ? <RefreshCw size={12} className="animate-spin" /> : <UserMinus size={12} />}
+          Sign Out
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-6">
+      {!open ? (
+        <button
+          onClick={() => setOpen(true)}
+          className="flex items-center gap-2 px-4 py-2.5 bg-teal-500/10 border border-teal-500/30 text-teal-400 rounded-lg text-sm hover:bg-teal-500/20 transition-colors"
+        >
+          <UserPlus size={15} />
+          Announce Yourself to the Protocol
+        </button>
+      ) : (
+        <div className="bg-cyber-surface border border-teal-500/25 rounded-xl p-5 flex flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <h3 className="font-semibold text-white text-sm">Announce as Participant</h3>
+            <button onClick={() => setOpen(false)} className="text-gray-500 hover:text-gray-300 text-xs">✕</button>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">Display Name *</label>
+              <input
+                value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                maxLength={32}
+                placeholder="MyBot-1 or YourName"
+                className="w-full bg-cyber-bg border border-cyber-border rounded-md px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-teal-500/50"
+              />
+            </div>
+            <div>
+              <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">Role *</label>
+              <select
+                value={form.role}
+                onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
+                className="w-full bg-cyber-bg border border-cyber-border rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:border-teal-500/50"
+              >
+                {VALID_ANNOUNCE_ROLES.map(r => <option key={r}>{r}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">Type *</label>
+              <select
+                value={form.participantType}
+                onChange={e => setForm(f => ({ ...f, participantType: e.target.value as 'agent' | 'human' }))}
+                className="w-full bg-cyber-bg border border-cyber-border rounded-md px-3 py-2 text-sm text-white focus:outline-none focus:border-teal-500/50"
+              >
+                <option value="human">Human Participant</option>
+                <option value="agent">Autonomous Agent</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[10px] text-gray-500 uppercase tracking-wider block mb-1">
+                Contact URL <span className="text-gray-600 normal-case">(optional)</span>
+              </label>
+              <input
+                value={form.contact}
+                onChange={e => setForm(f => ({ ...f, contact: e.target.value }))}
+                placeholder="https://your-bot.example.com/bargain"
+                className="w-full bg-cyber-bg border border-cyber-border rounded-md px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-teal-500/50"
+              />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleAnnounce}
+              disabled={busy || !form.name.trim()}
+              className="flex items-center gap-2 px-4 py-2 bg-teal-500 text-white rounded-lg text-sm font-medium hover:bg-teal-400 disabled:opacity-40 transition-colors"
+            >
+              {busy ? <RefreshCw size={13} className="animate-spin" /> : <UserPlus size={13} />}
+              Sign & Announce
+            </button>
+            <p className="text-[10px] text-gray-600">Expires 24h after your last sign-in.</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function Profile() {
   const { address: paramAddress } = useParams<{ address: string }>();
+  const { address: connectedAddress } = useAccount();
   const publicClient = usePublicClient();
   const [events, setEvents] = useState<DealEvent[]>([]);
   const [loadingEvents, setLoadingEvents] = useState(true);
@@ -231,15 +458,19 @@ export default function Profile() {
     }).catch(() => {});
   }, [publicClient, address]);
 
-  // Chain events
+  // Chain events — stale flag prevents a second effect run from overwriting the first result
   useEffect(() => {
     if (!publicClient || !address) return;
+    let stale = false;
     setLoadingEvents(true);
     fetchAddressEvents(publicClient, address).then(evts => {
-      setEvents(evts);
-      setLoadingEvents(false);
+      if (!stale) {
+        setEvents(evts);
+        setLoadingEvents(false);
+      }
     });
-  }, [publicClient, address]);
+    return () => { stale = true; };
+  }, [address]); // intentionally omit publicClient — it's stable once the chain is connected
 
   if (!address || address.length < 10) {
     return (
@@ -263,6 +494,11 @@ export default function Profile() {
         <ArrowLeft size={16} className="mr-2" />
         Back
       </Link>
+
+      {/* Announce panel — only on own profile, non-agent addresses */}
+      {connectedAddress?.toLowerCase() === address.toLowerCase() && !isAgent && (
+        <AnnouncePanel address={address} />
+      )}
 
       {/* Identity Card */}
       <motion.div

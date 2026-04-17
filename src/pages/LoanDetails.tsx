@@ -407,7 +407,7 @@ export default function LoanDetails() {
           {/* Chart */}
           <div className="bg-cyber-surface rounded-xl border border-cyber-border p-6">
             <div className="mb-6">
-              <h2 className="text-lg font-semibold text-white">Collateral Valuation (Simulated)</h2>
+              <h2 className="text-lg font-semibold text-white">Collateral Valuation (on-chain)</h2>
               <p className="text-sm text-gray-400">Estimated NFT value vs Liquidation Threshold</p>
             </div>
             <div className="h-[300px] w-full">
