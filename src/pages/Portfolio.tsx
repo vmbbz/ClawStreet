@@ -47,9 +47,9 @@ export default function Portfolio() {
   const loanIds = Array.from({ length: totalLoans }, (_, i) => i);
   const optionIds = Array.from({ length: totalOptions }, (_, i) => i);
 
-  const TABS: { key: PortfolioTab; label: string; count: number }[] = [
-    { key: 'loans',   label: 'Loans',   count: totalLoans },
-    { key: 'options', label: 'Options', count: totalOptions },
+  const TABS: { key: PortfolioTab; label: string }[] = [
+    { key: 'loans',   label: 'Loans'   },
+    { key: 'options', label: 'Options' },
   ];
 
   return (
@@ -80,16 +80,13 @@ export default function Portfolio() {
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`px-4 py-2.5 text-sm font-medium rounded-t-md transition-colors flex items-center gap-2 ${
+            className={`px-4 py-2.5 text-sm font-medium rounded-t-md transition-colors ${
               tab === t.key
                 ? 'text-white border-b-2 border-base-blue -mb-px'
                 : 'text-gray-500 hover:text-gray-300'
             }`}
           >
             {t.label}
-            <span className={`text-xs px-1.5 py-0.5 rounded-full ${tab === t.key ? 'bg-base-blue/20 text-base-blue' : 'bg-white/5 text-gray-500'}`}>
-              {t.count}
-            </span>
           </button>
         ))}
       </div>

@@ -33,19 +33,32 @@ body {
   color: #0f172a;
 }
 
-/* In light mode, force readable text on elements that hardcode "text-white" */
-[data-theme="light"] .text-white {
-  color: #0f172a !important;
-}
-[data-theme="light"] .text-gray-400 {
-  color: #475569 !important;
-}
-[data-theme="light"] .text-gray-500 {
-  color: #64748b !important;
-}
-[data-theme="light"] .text-gray-300 {
-  color: #334155 !important;
-}
+/* ─── Light mode text contrast overrides ────────────────────────────────────── */
+
+/* Near-white grays → dark slate (these are invisible on white bg) */
+[data-theme="light"] .text-white   { color: #0f172a !important; }
+[data-theme="light"] .text-gray-100 { color: #0f172a !important; }
+[data-theme="light"] .text-gray-200 { color: #1e293b !important; }
+[data-theme="light"] .text-gray-300 { color: #334155 !important; }
+[data-theme="light"] .text-gray-400 { color: #475569 !important; }
+[data-theme="light"] .text-gray-500 { color: #64748b !important; }
+[data-theme="light"] .text-gray-600 { color: #374151 !important; }
+
+/* Pastel accent colors → darker variants for white backgrounds */
+[data-theme="light"] .text-green-400   { color: #15803d !important; }
+[data-theme="light"] .text-red-400     { color: #dc2626 !important; }
+[data-theme="light"] .text-yellow-400  { color: #b45309 !important; }
+[data-theme="light"] .text-orange-400  { color: #c2410c !important; }
+[data-theme="light"] .text-purple-400  { color: #7c3aed !important; }
+[data-theme="light"] .text-blue-400    { color: #1d4ed8 !important; }
+[data-theme="light"] .text-emerald-400 { color: #059669 !important; }
+[data-theme="light"] .text-pink-400    { color: #be185d !important; }
+[data-theme="light"] .text-cyan-400    { color: #0e7490 !important; }
+[data-theme="light"] .text-indigo-400  { color: #4338ca !important; }
+
+/* Ghost/transparent backgrounds → visible subtle tint on light */
+[data-theme="light"] .bg-white\/5  { background-color: #f1f5f9 !important; }
+[data-theme="light"] .bg-white\/10 { background-color: #e2e8f0 !important; }
 
 /* Nav + card backgrounds in light */
 [data-theme="light"] nav {

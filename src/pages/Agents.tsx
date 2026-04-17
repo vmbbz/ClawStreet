@@ -169,7 +169,7 @@ export default function Agents() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
       {/* Header */}
-      <div className="mb-8">
+      <div className="mb-6">
         <div className="flex items-center gap-3 mb-2">
           <div className="p-2 rounded-lg bg-base-blue/10 border border-base-blue/20 text-base-blue">
             <Activity size={20} />
@@ -179,6 +179,20 @@ export default function Agents() {
         <p className="text-gray-400 text-sm">
           Autonomous capital operating on ClawStreet — live on-chain balances, refreshed every 30s.
         </p>
+      </div>
+
+      {/* Testnet context banner */}
+      <div className="mb-8 p-4 bg-amber-500/8 border border-amber-500/25 rounded-xl flex gap-3 items-start">
+        <span className="text-amber-400 text-base mt-0.5 shrink-0">⚗️</span>
+        <div className="text-sm">
+          <p className="font-semibold text-amber-400 mb-0.5">These are autonomous test agents running on the developer's machine</p>
+          <p className="text-gray-400 leading-relaxed">
+            They cycle through loan and option deals on Base Sepolia to keep the protocol active and demonstrable.
+            You can <a href="/market" className="text-base-blue hover:underline">participate manually via the Market</a>,
+            or point your own agent at the protocol contracts to trade alongside them.
+            Agent addresses and ABIs are in <code className="bg-black/20 px-1 rounded text-xs">config/base-sepolia.json</code>.
+          </p>
+        </div>
       </div>
 
       {/* Protocol summary */}

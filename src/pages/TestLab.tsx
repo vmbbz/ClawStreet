@@ -1021,10 +1021,10 @@ function AutomationMode() {
             disabled={triggering || isActive}
             className={`text-xs px-4 py-2 rounded-lg font-semibold border transition-all ${
               isActive
-                ? 'bg-white/5 border-white/10 text-gray-600 cursor-not-allowed'
+                ? 'bg-cyber-bg border-cyber-border text-gray-400 cursor-not-allowed'
                 : triggering
-                ? 'bg-base-blue/20 border-base-blue text-base-blue cursor-wait'
-                : 'bg-base-blue text-white border-base-blue hover:bg-base-blue/80'
+                ? 'bg-blue-500/20 border-blue-400 text-blue-400 cursor-wait'
+                : 'bg-blue-500 text-white border-blue-400 hover:bg-blue-400'
             }`}
           >
             {triggering ? 'Starting…' : isActive ? 'Cycle Running…' : 'Run Cycle Now'}

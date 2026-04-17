@@ -48,11 +48,11 @@ function NotFound() {
 const NAV_LINKS = [
   { path: '/market',    label: 'Market' },
   { path: '/portfolio', label: 'Portfolio' },
-  { path: '/agents',   label: 'Agents' },
-  { path: '/stake',    label: 'Stake $STREET' },
+  { path: '/agents',   label: 'Agents',    testnet: true },
+  { path: '/stake',    label: 'Stake' },
   { path: '/api-docs', label: 'Agent API' },
-  { path: '/test-lab', label: 'Test Lab' },
-  { path: '/admin',    label: 'Admin' },
+  { path: '/test-lab', label: 'Test Lab',  testnet: true },
+  { path: '/admin',    label: 'Admin',     testnet: true },
 ];
 
 // ─── Desktop nav links ────────────────────────────────────────────────────────
@@ -72,8 +72,11 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
           className={`px-3 py-2 rounded-md text-sm font-medium transition-colors ${
             isActive(link.path)
               ? 'bg-base-blue/10 text-base-blue'
+              : link.testnet
+              ? 'text-amber-500/70 hover:text-amber-400 hover:bg-amber-500/5'
               : 'text-gray-400 hover:text-white hover:bg-white/5'
           }`}
+          title={link.testnet ? 'Testnet / dev tooling' : undefined}
         >
           {link.label}
         </Link>

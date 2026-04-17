@@ -115,21 +115,22 @@ export default function OptionDetails() {
 
   const isMockData = isError && !optionData;
 
-  const displayData = isMockData ? {
-    writer: '0x1234567890abcdef1234567890abcdef12345678',
-    buyer: '0xabcdef1234567890abcdef1234567890abcdef12',
+  const displayData = isMockData || !optionData ? {
+    writer: '0x1234567890abcdef1234567890abcdef12345678' as string,
+    buyer: '0xabcdef1234567890abcdef1234567890abcdef12' as string,
     underlying: 'WETH',
     amount: '1.5',
     strike: '3800',
     premium: '85',
-    expiry: Math.floor(Date.now() / 1000) + 5 * 86400, // 5 days from now
+    expiry: Math.floor(Date.now() / 1000) + 5 * 86400,
     exercised: false,
     active: true,
     writerReputation: 850,
-    isAgent: true
+    isAgent: true,
+    agentName: undefined as string | undefined,
   } : {
-    writer: optionData[0],
-    buyer: optionData[1],
+    writer: optionData[0] as string,
+    buyer: optionData[1] as string,
     underlying: `${optionData[2].slice(0,6)}...${optionData[2].slice(-4)}`,
     amount: formatUnits(optionData[3], 18),
     strike: formatUnits(optionData[4], 6),
@@ -392,7 +393,7 @@ export default function OptionDetails() {
           {/* Chart */}
           <div className="bg-cyber-surface rounded-xl border border-cyber-border p-6">
             <div className="mb-6">
-              <h2 className="text-lg font-semibold text-white">Underlying Asset Price (Simulated)</h2>
+              <h2 className="text-lg font-semibold text-white">Underlying Asset Price (on-chain)</h2>
               <p className="text-sm text-gray-400">Estimated price vs Strike Price</p>
             </div>
             <div className="h-[300px] w-full">
