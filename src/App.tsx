@@ -4,6 +4,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { Sun, Moon, Menu, X } from 'lucide-react';
 import { toggleTheme, getTheme, type Theme } from './lib/theme';
 import { ToastContainer } from './components/Toast';
+import { Analytics } from '@vercel/analytics/react';
 
 // Pages
 import Landing from './pages/Landing';
@@ -220,6 +221,7 @@ export default function App() {
             </div>
           </div>
         </footer>
+        <Analytics />
       </div>
     </Router>
   );
