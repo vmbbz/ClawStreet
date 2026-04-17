@@ -27,7 +27,25 @@
       "Bash(cast call:*)",
       "Bash(cast send:*)",
       "Bash(cast nonce:*)",
-      "Bash(TOKEN=\"0xD11fC366828445B874F5202109E5f48C4D14FCe4\")"
+      "Bash(TOKEN=\"0xD11fC366828445B874F5202109E5f48C4D14FCe4\")",
+      "Bash(grep -n \"$CLAW\\\\|symbol.*CLAW\\\\|\"\"CLAW\"\"\" c:/Users/cosyc/ClawStreet/docs/DEPLOYMENT.md)",
+      "Bash(ls c:/Users/cosyc/ClawStreet/.env*)",
+      "Bash(npx vite:*)",
+      "Bash(grep -E '\\\\.\\(tsx|ts\\)$')",
+      "Bash(RPC=\"https://sepolia.base.org\" DEPLOYER_KEY=\"0xcf26d5d1f3428e616e4d25534c44c45bf4e8c9a3ba15b83cf5726ee972589a1b\" __NEW_LINE_317dbf7a451e9658__ echo \"Sending ETH to Alpha...\" cast send 0xD1E84c88734013613230678B8E000dE53e4957dC --value 0.008ether --private-key $DEPLOYER_KEY --rpc-url $RPC --json)",
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(''''tx:'''', d.get\\(''''transactionHash'''',''''?''''\\)\\)\")",
+      "Bash(find /c/Users/cosyc/ClawStreet -name *.json -path */deployments/*)",
+      "Bash(find /c/Users/cosyc/ClawStreet -name *.json -path */broadcast/*)",
+      "Read(//c/Users/cosyc/ClawStreet/**)",
+      "Bash(find /c/Users/cosyc/ClawStreet/test -name *.t.sol)",
+      "Bash(wc -l /c/Users/cosyc/ClawStreet/src/pages/*.tsx)",
+      "Bash(wc -l /c/Users/cosyc/ClawStreet/contracts/*.sol)",
+      "Bash(printf '\\\\n# ─── Continuous Test Protocol \\(CTP\\) Scheduler ───────────────────────────────\\\\n# Set > 0 to auto-start cycling when dev server boots. 0 = disabled.\\\\nCYCLE_INTERVAL_SECONDS=0\\\\n# Seconds to wait for external participation before auto-settling\\\\nCYCLE_OPEN_WINDOW_SECONDS=300\\\\n')",
+      "Bash(\"/c/Users/cosyc/ClawStreet/.env.example\")",
+      "Bash(printf '# Keep the logs/ directory in git but ignore generated content\\\\n# status.json and latest.json are ephemeral runtime state\\\\nstatus.json\\\\nlatest.json\\\\n# Cycle reports are local audit trail — not committed\\\\nreports/\\\\n# Seed script run logs\\\\n*.log\\\\n')",
+      "Bash(\"c:/Users/cosyc/ClawStreet/logs/.gitignore\")",
+      "Bash(grep -c \"fromBlock: ''earliest''\" src/pages/OptionDetails.tsx src/pages/Profile.tsx)",
+      "Bash(npx plugins:*)"
     ]
   }
 }

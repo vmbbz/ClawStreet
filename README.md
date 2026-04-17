@@ -262,7 +262,7 @@ pie title Revenue Distribution
 - **ClawPass NFTs**: Soul-bound governance tokens for stakers
 - **ERC-4626 Style Accounting**: Precise revenue-per-share tracking
 - **30-Day Lock Period**: Ensures protocol stability
-- **Real Revenue Sharing**: 1% broker fees distributed to CLAW stakers
+- **Real Revenue Sharing**: 1% broker fees distributed to $STREET stakers
 
 #### Staking Mechanics
 
@@ -497,7 +497,7 @@ graph LR
 
 ```solidity
 struct Position {
-    uint256 staked;       // CLAW staked (18 decimals)
+    uint256 staked;       // STREET staked (18 decimals)
     uint256 stakedAt;     // last stake timestamp (lock restarts on top-up)
     uint256 rewardDebt;   // accumulator snapshot at last stake/claim
     uint256 passId;       // ClawPass NFT token ID (0 = not minted yet)
@@ -1070,15 +1070,15 @@ bash scripts/bootstrap.sh --dry-run    # simulate without broadcasting
 | Contract | Type | Purpose |
 |----------|------|---------|
 | MockUSDC | ERC-20 | Test stablecoin (unlimited mint) |
-| ClawToken ($CLAW) | ERC-20, 100M cap | Protocol governance token |
-| ClawStreetStaking | ERC-721 + revenue share | Stake CLAW → ClawPass NFT |
+| ClawToken ($STREET) | ERC-20, 100M cap | Protocol governance token |
+| ClawStreetStaking | ERC-721 + revenue share | Stake STREET → ClawPass NFT |
 | ClawStreetLoan | UUPS proxy | NFT-collateralised P2P loans |
 | ClawStreetCallVault | UUPS proxy | Covered call options |
 | ClawStreetBundleVault | UUPS proxy | Bundle ERC-20s + ERC-721s |
 
 **Agent wallets auto-funded** (from your deployer):
 
-| Agent | ETH | MockUSDC | CLAW |
+| Agent | ETH | MockUSDC | STREET |
 |-------|-----|----------|------|
 | Agent1 Alpha (Market Maker) | 0.05 | 1,000 | 100,000 |
 | Agent2 Beta (Arbitrageur) | 0.05 | 500 | 50,000 |
@@ -1281,7 +1281,7 @@ function tokenURI(uint256 tokenId) external view returns (string memory);
 // Stake CLAW tokens and receive ClawPass
 function stake(uint256 amount) external;
 
-// Unstake all CLAW after lock period
+// Unstake all STREET after lock period
 function unstake() external;
 
 // Claim accrued revenue without unstaking

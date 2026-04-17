@@ -9,7 +9,16 @@
     "build": "vite build && esbuild server.ts --bundle --platform=node --target=node18 --outfile=dist/server.cjs",
     "preview": "vite preview",
     "clean": "rm -rf dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "seed": "tsx scripts/seed-sepolia.ts",
+    "seed:check": "tsx scripts/seed-sepolia.ts --dry-run",
+    "seed:loans": "tsx scripts/seed-sepolia.ts --only loans",
+    "seed:options": "tsx scripts/seed-sepolia.ts --only options",
+    "seed:staking": "tsx scripts/seed-sepolia.ts --only staking",
+    "runner": "tsx scripts/agent-runner.ts --interval 7200",
+    "runner:once": "tsx scripts/agent-runner.ts --once",
+    "runner:dev": "tsx scripts/agent-runner.ts --interval 300 --open-window 60",
+    "runner:schedule": "tsx scripts/agent-runner.ts --interval 3600 --open-window 1800"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",

@@ -1,55 +1,158 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useReadContract, useWriteContract, useAccount, useWaitForTransactionReceipt } from 'wagmi';
 import { formatUnits } from 'viem';
-import { CONTRACT_ADDRESSES, clawStreetLoanABI } from '../config/contracts';
+import { CONTRACT_ADDRESSES, clawStreetLoanABI, clawStreetCallVaultABI } from '../config/contracts';
 import { Modal } from '../components/Modal';
-import { AlertCircle, ShieldCheck, User } from 'lucide-react';
+import { AlertCircle, ShieldCheck, User, Loader2, Wallet, Target, Copy, Check } from 'lucide-react';
+import { toast } from '../components/Toast';
+
+function CopyAddress({ addr }: { addr: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={e => { e.stopPropagation(); navigator.clipboard.writeText(addr); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+      className="ml-1 text-gray-600 hover:text-gray-300 transition-colors"
+      title="Copy address"
+    >
+      {copied ? <Check size={10} className="text-green-400" /> : <Copy size={10} />}
+    </button>
+  );
+}
+
+type PortfolioTab = 'loans' | 'options';
 
 export default function Portfolio() {
   const { address } = useAccount();
+  const [tab, setTab] = useState<PortfolioTab>('loans');
 
-  const { data: loanCounter, isError: isCounterError } = useReadContract({
+  const { data: loanCounter, isError: isLoanError } = useReadContract({
     address: CONTRACT_ADDRESSES.LOAN_ENGINE,
     abi: clawStreetLoanABI,
     functionName: 'loanCounter',
   });
 
-  const isMockData = isCounterError || loanCounter === undefined || Number(loanCounter) === 0;
-  const totalLoans = isMockData ? 2 : Number(loanCounter);
+  const { data: optionCounter, isError: isOptionError } = useReadContract({
+    address: CONTRACT_ADDRESSES.CALL_VAULT,
+    abi: clawStreetCallVaultABI,
+    functionName: 'optionCounter',
+  });
+
+  const isCounterError = isLoanError && isOptionError;
+  const isLoading = (loanCounter === undefined && !isLoanError) || (optionCounter === undefined && !isOptionError);
+  const isMockData = isCounterError;
+  const totalLoans = isMockData ? 2 : Number(loanCounter ?? 0);
+  const totalOptions = isMockData ? 1 : Number(optionCounter ?? 0);
+  const isEmpty = !isLoading && !isMockData && totalLoans === 0 && totalOptions === 0;
   const loanIds = Array.from({ length: totalLoans }, (_, i) => i);
+  const optionIds = Array.from({ length: totalOptions }, (_, i) => i);
+
+  const TABS: { key: PortfolioTab; label: string; count: number }[] = [
+    { key: 'loans',   label: 'Loans',   count: totalLoans },
+    { key: 'options', label: 'Options', count: totalOptions },
+  ];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
       {isMockData && (
-        <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg flex items-center space-x-3 text-yellow-500 text-sm">
+        <div className="mb-6 p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg flex items-center space-x-3 text-orange-400 text-sm">
           <AlertCircle size={18} />
-          <span>Smart contracts not detected on this network. Displaying placeholder portfolio.</span>
+          <span>RPC unavailable — showing demo portfolio data.</span>
         </div>
       )}
 
-      <h1 className="text-3xl font-bold mb-8 text-white">My Loans & Positions</h1>
-      
-      <div className="grid md:grid-cols-2 gap-8">
-        <div>
-          <h2 className="text-lg font-semibold mb-4 text-gray-300 border-b border-cyber-border pb-2">Borrowed</h2>
-          <div className="space-y-4">
-            {loanIds.map(id => (
-              <BorrowedItem key={`borrow-${id}`} id={id} isMock={isMockData} />
-            ))}
-            {isMockData && <BorrowedItem id={99} isMock={true} />}
-          </div>
+      {!address && (
+        <div className="mb-6 p-4 bg-cyber-surface border border-cyber-border rounded-lg flex items-center space-x-3 text-gray-400 text-sm">
+          <Wallet size={18} />
+          <span>Connect your wallet to see your positions.</span>
         </div>
-        
-        <div>
-          <h2 className="text-lg font-semibold mb-4 text-gray-300 border-b border-cyber-border pb-2">Lent</h2>
-          <div className="space-y-4">
-            {loanIds.map(id => (
-              <LentItem key={`lent-${id}`} id={id} isMock={isMockData} />
-            ))}
-          </div>
-        </div>
+      )}
+
+      <h1 className="text-3xl font-bold mb-2 text-white">Portfolio</h1>
+      <p className="text-gray-400 text-sm mb-6">
+        Your active and historical positions on ClawStreet.
+        {!isMockData && !isLoading && <span className="ml-2 text-green-400">● Live</span>}
+      </p>
+
+      {/* Tab bar */}
+      <div className="flex gap-1 mb-8 border-b border-cyber-border">
+        {TABS.map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`px-4 py-2.5 text-sm font-medium rounded-t-md transition-colors flex items-center gap-2 ${
+              tab === t.key
+                ? 'text-white border-b-2 border-base-blue -mb-px'
+                : 'text-gray-500 hover:text-gray-300'
+            }`}
+          >
+            {t.label}
+            <span className={`text-xs px-1.5 py-0.5 rounded-full ${tab === t.key ? 'bg-base-blue/20 text-base-blue' : 'bg-white/5 text-gray-500'}`}>
+              {t.count}
+            </span>
+          </button>
+        ))}
       </div>
+
+      {isLoading && (
+        <div className="flex items-center justify-center py-20 text-gray-500">
+          <Loader2 className="animate-spin mr-3" size={20} />
+          <span className="text-sm">Reading from Base Sepolia...</span>
+        </div>
+      )}
+
+      {isEmpty && (
+        <div className="text-center py-20 border border-dashed border-cyber-border rounded-xl">
+          <Wallet className="mx-auto mb-4 text-gray-600" size={40} />
+          <h3 className="text-lg font-semibold text-white mb-2">No positions yet</h3>
+          <p className="text-gray-500 text-sm">Visit the <Link to="/market" className="text-base-blue hover:underline">Market</Link> to create or fund a deal.</p>
+        </div>
+      )}
+
+      {/* Loans tab */}
+      {!isLoading && !isEmpty && tab === 'loans' && (
+        <div className="grid md:grid-cols-2 gap-8">
+          <div>
+            <h2 className="text-lg font-semibold mb-4 text-gray-300 border-b border-cyber-border pb-2">Borrowed</h2>
+            <div className="space-y-4">
+              {loanIds.map(id => (
+                <BorrowedItem key={`borrow-${id}`} id={id} isMock={isMockData} />
+              ))}
+              {isMockData && <BorrowedItem id={99} isMock={true} />}
+            </div>
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold mb-4 text-gray-300 border-b border-cyber-border pb-2">Lent</h2>
+            <div className="space-y-4">
+              {loanIds.map(id => (
+                <LentItem key={`lent-${id}`} id={id} isMock={isMockData} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Options tab */}
+      {!isLoading && !isEmpty && tab === 'options' && (
+        <div className="grid md:grid-cols-2 gap-8">
+          <div>
+            <h2 className="text-lg font-semibold mb-4 text-gray-300 border-b border-cyber-border pb-2">Written (as writer)</h2>
+            <div className="space-y-4">
+              {optionIds.map(id => (
+                <WrittenOptionItem key={`written-${id}`} id={id} isMock={isMockData} />
+              ))}
+            </div>
+          </div>
+          <div>
+            <h2 className="text-lg font-semibold mb-4 text-gray-300 border-b border-cyber-border pb-2">Bought (as buyer)</h2>
+            <div className="space-y-4">
+              {optionIds.map(id => (
+                <BoughtOptionItem key={`bought-${id}`} id={id} isMock={isMockData} />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -72,6 +175,9 @@ function BorrowedItem({ id, isMock }: { id: number, isMock: boolean, key?: React
 
   const { writeContract: cancelLoan, isPending: isCanceling, data: cancelTxHash } = useWriteContract();
   const { isLoading: isCancelConfirming, isSuccess: isCancelSuccess } = useWaitForTransactionReceipt({ hash: cancelTxHash });
+
+  useEffect(() => { if (isRepaySuccess && repayTxHash) toast.tx(`Loan #${id} repaid!`, repayTxHash); }, [isRepaySuccess, repayTxHash, id]);
+  useEffect(() => { if (isCancelSuccess && cancelTxHash) toast.tx(`Loan offer #${id} cancelled.`, cancelTxHash); }, [isCancelSuccess, cancelTxHash, id]);
 
   const handleRepay = () => {
     repayLoan({
@@ -106,7 +212,8 @@ function BorrowedItem({ id, isMock }: { id: number, isMock: boolean, key?: React
     interest: formatUnits(loanData[5], 6),
     active: loanData[9],
     repaid: loanData[10],
-    nftContract: `${loanData[2].slice(0,6)}...${loanData[2].slice(-4)}`
+    nftContract: `${loanData[2].slice(0,6)}...${loanData[2].slice(-4)}`,
+    nftContractFull: loanData[2],
   } : null;
 
   if (!displayData || (!isMock && displayData.borrower !== address) || (!displayData.active && !displayData.repaid)) return null;
@@ -118,9 +225,14 @@ function BorrowedItem({ id, isMock }: { id: number, isMock: boolean, key?: React
     <>
       <div className="bg-cyber-surface p-4 rounded-xl border border-cyber-border flex justify-between items-center hover:border-base-blue/30 transition-colors">
         <div>
-          <Link to={`/loan/${id}`} className="font-semibold text-white text-sm hover:text-base-blue transition-colors">
-            NFT: {displayData.nftContract}
-          </Link>
+          <div className="flex items-center gap-1">
+            <Link to={`/loan/${id}`} className="font-semibold text-white text-sm hover:text-base-blue transition-colors">
+              NFT: {displayData.nftContract}
+            </Link>
+            {'nftContractFull' in displayData && displayData.nftContractFull && (
+              <CopyAddress addr={displayData.nftContractFull as string} />
+            )}
+          </div>
           <p className="text-xs text-gray-400 mt-1">Owe: {totalOwed} USDC</p>
           {displayData.repaid ? (
             <p className="text-[10px] text-green-400 mt-1 font-medium">Repaid</p>
@@ -218,6 +330,8 @@ function LentItem({ id, isMock }: { id: number, isMock: boolean, key?: React.Key
   const { writeContract: claimDefault, isPending: isClaiming, data: claimTxHash } = useWriteContract();
   const { isLoading: isClaimConfirming, isSuccess: isClaimSuccess } = useWaitForTransactionReceipt({ hash: claimTxHash });
 
+  useEffect(() => { if (isClaimSuccess && claimTxHash) toast.tx(`NFT from Loan #${id} claimed!`, claimTxHash); }, [isClaimSuccess, claimTxHash, id]);
+
   const handleClaim = () => {
     claimDefault({
       address: CONTRACT_ADDRESSES.LOAN_ENGINE,
@@ -253,7 +367,7 @@ function LentItem({ id, isMock }: { id: number, isMock: boolean, key?: React.Key
 
   if (!displayData || (!isMock && displayData.lender !== address) || (!displayData.active && !displayData.repaid)) return null;
 
-  const isDefaulted = !displayData.repaid && displayData.active && (Math.floor(Date.now() / 1000) > displayData.startTime + displayData.duration * 86400);
+  const isDefaulted = !displayData.repaid && displayData.active && (Math.floor(Date.now() / 1000) > Number(displayData.startTime) + Number(displayData.duration) * 86400);
 
   return (
     <>
@@ -316,5 +430,152 @@ function LentItem({ id, isMock }: { id: number, isMock: boolean, key?: React.Key
         </div>
       </Modal>
     </>
+  );
+}
+
+// ─── Options: Written ─────────────────────────────────────────────────────────
+
+function WrittenOptionItem({ id, isMock }: { id: number; isMock: boolean }) {
+  const { address } = useAccount();
+
+  const { data: optionData } = useReadContract({
+    address: CONTRACT_ADDRESSES.CALL_VAULT,
+    abi: clawStreetCallVaultABI,
+    functionName: 'options',
+    args: [BigInt(id)],
+    query: { enabled: !isMock },
+  });
+
+  const { writeContract: cancelOption, isPending: isCanceling, data: cancelTxHash } = useWriteContract();
+  const { isLoading: isCancelConfirming, isSuccess: isCancelSuccess } = useWaitForTransactionReceipt({ hash: cancelTxHash });
+
+  const displayData = isMock ? {
+    writer: address,
+    buyer: '0x0000000000000000000000000000000000000000',
+    underlying: '0xTestWETH',
+    amount: '1.0',
+    strike: '2000',
+    premium: '50',
+    exercised: false,
+    active: true,
+  } : optionData ? {
+    writer: optionData[0],
+    buyer: optionData[1],
+    underlying: `${optionData[2].slice(0, 6)}...${optionData[2].slice(-4)}`,
+    amount: formatUnits(optionData[3], 18),
+    strike: formatUnits(optionData[4], 6),
+    premium: formatUnits(optionData[5], 6),
+    exercised: optionData[7],
+    active: optionData[8],
+  } : null;
+
+  if (!displayData) return null;
+  if (!isMock && displayData.writer !== address) return null;
+  if (!displayData.active && !displayData.exercised) return null;
+
+  const hasBuyer = displayData.buyer !== '0x0000000000000000000000000000000000000000';
+
+  return (
+    <div className="bg-cyber-surface p-4 rounded-xl border border-cyber-border hover:border-purple-500/30 transition-colors">
+      <div className="flex items-center justify-between">
+        <div>
+          <Link to={`/option/${id}`} className="font-semibold text-white text-sm hover:text-purple-400 transition-colors flex items-center gap-1.5">
+            <Target size={12} className="text-purple-400" />
+            Call Option #{id}
+          </Link>
+          <p className="text-xs text-gray-400 mt-1">{displayData.amount} tokens @ ${displayData.strike} strike</p>
+          <p className="text-[10px] mt-1 font-medium">
+            {displayData.exercised
+              ? <span className="text-gray-500">Exercised</span>
+              : hasBuyer
+              ? <span className="text-purple-400">Sold — Premium: ${displayData.premium}</span>
+              : <span className="text-yellow-400">Open — Premium: ${displayData.premium}</span>
+            }
+          </p>
+        </div>
+        {!hasBuyer && !displayData.exercised && (
+          <button
+            onClick={() => cancelOption({
+              address: CONTRACT_ADDRESSES.CALL_VAULT,
+              abi: clawStreetCallVaultABI,
+              functionName: 'cancelOption',
+              args: [BigInt(id)],
+            } as any)}
+            disabled={isCanceling || isCancelConfirming || isCancelSuccess}
+            className="px-3 py-1.5 text-xs bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50"
+          >
+            {isCanceling || isCancelConfirming ? 'Canceling...' : isCancelSuccess ? 'Cancelled' : 'Cancel'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Options: Bought ──────────────────────────────────────────────────────────
+
+function BoughtOptionItem({ id, isMock }: { id: number; isMock: boolean }) {
+  const { address } = useAccount();
+
+  const { data: optionData } = useReadContract({
+    address: CONTRACT_ADDRESSES.CALL_VAULT,
+    abi: clawStreetCallVaultABI,
+    functionName: 'options',
+    args: [BigInt(id)],
+    query: { enabled: !isMock },
+  });
+
+  const { writeContract: exerciseOption, isPending: isExercising, data: exerciseTxHash } = useWriteContract();
+  const { isLoading: isExerciseConfirming, isSuccess: isExerciseSuccess } = useWaitForTransactionReceipt({ hash: exerciseTxHash });
+
+  const displayData = isMock ? null : optionData ? {
+    writer: optionData[0],
+    buyer: optionData[1],
+    amount: formatUnits(optionData[3], 18),
+    strike: formatUnits(optionData[4], 6),
+    expiry: Number(optionData[5]),
+    exercised: optionData[7],
+    active: optionData[8],
+  } : null;
+
+  if (!displayData) return null;
+  if (displayData.buyer !== address) return null;
+
+  const isExpired = Math.floor(Date.now() / 1000) > displayData.expiry;
+
+  return (
+    <div className="bg-cyber-surface p-4 rounded-xl border border-cyber-border hover:border-purple-500/30 transition-colors">
+      <div className="flex items-center justify-between">
+        <div>
+          <Link to={`/option/${id}`} className="font-semibold text-white text-sm hover:text-purple-400 transition-colors flex items-center gap-1.5">
+            <Target size={12} className="text-purple-400" />
+            Call Option #{id}
+          </Link>
+          <p className="text-xs text-gray-400 mt-1">{displayData.amount} tokens @ ${displayData.strike}</p>
+          <p className="text-[10px] mt-1 font-medium">
+            {displayData.exercised
+              ? <span className="text-green-400">Exercised</span>
+              : isExpired
+              ? <span className="text-gray-500">Expired</span>
+              : <span className="text-purple-400">Active</span>
+            }
+          </p>
+        </div>
+        {!displayData.exercised && !isExpired && (
+          <button
+            onClick={() => exerciseOption({
+              address: CONTRACT_ADDRESSES.CALL_VAULT,
+              abi: clawStreetCallVaultABI,
+              functionName: 'exercise',
+              args: [BigInt(id)],
+            } as any)}
+            disabled={isExercising || isExerciseConfirming || isExerciseSuccess}
+            className="px-3 py-1.5 text-xs bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-lg hover:bg-purple-500/30 transition-colors disabled:opacity-50"
+          >
+            {isExercising || isExerciseConfirming ? 'Exercising...' : isExerciseSuccess ? 'Done' : 'Exercise'}
+          </button>
+        )}
+      </div>
+    </div>
   );
 }

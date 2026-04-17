@@ -1,10 +1,25 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useReadContract, useAccount, usePublicClient } from 'wagmi';
+import { useReadContract, useAccount, usePublicClient, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { formatUnits, parseAbiItem } from 'viem';
-import { ArrowLeft, ShieldAlert, TrendingUp, Clock, Activity, Info, ShieldCheck, ChevronDown, ChevronUp, User } from 'lucide-react';
+import { ArrowLeft, ShieldAlert, TrendingUp, Clock, Activity, Info, ShieldCheck, ChevronDown, ChevronUp, User, Copy, Check } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { CONTRACT_ADDRESSES, clawStreetCallVaultABI } from '../config/contracts';
+import { CONTRACT_ADDRESSES, clawStreetCallVaultABI, getAgentInfo, PYTH_FEEDS, BASESCAN } from '../config/contracts';
+import { fetchPythHistory } from '../lib/pyth';
+import { toast } from '../components/Toast';
+
+function CopyAddress({ addr }: { addr: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => { navigator.clipboard.writeText(addr); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+      className="ml-1.5 text-gray-600 hover:text-gray-300 transition-colors flex-shrink-0"
+      title="Copy address"
+    >
+      {copied ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
+    </button>
+  );
+}
 
 export default function OptionDetails() {
   const { id } = useParams<{ id: string }>();
@@ -20,33 +35,36 @@ export default function OptionDetails() {
       setIsLoadingEvents(true);
       try {
         const optionId = BigInt(id);
-        
+        // Use a recent block window — public RPC limits getLogs to 10,000 blocks
+        const currentBlock = await publicClient.getBlockNumber();
+        const fromBlock = currentBlock > 9500n ? currentBlock - 9500n : 0n;
+
         const writtenLogs = await publicClient.getLogs({
           address: CONTRACT_ADDRESSES.CALL_VAULT,
           event: parseAbiItem('event OptionWritten(uint256 indexed optionId, address indexed writer, uint256 amount, uint256 strike, uint256 premium)'),
           args: { optionId },
-          fromBlock: 'earliest'
+          fromBlock,
         });
-        
+
         const boughtLogs = await publicClient.getLogs({
           address: CONTRACT_ADDRESSES.CALL_VAULT,
           event: parseAbiItem('event OptionBought(uint256 indexed optionId, address indexed buyer)'),
           args: { optionId },
-          fromBlock: 'earliest'
+          fromBlock,
         });
 
         const exercisedLogs = await publicClient.getLogs({
           address: CONTRACT_ADDRESSES.CALL_VAULT,
           event: parseAbiItem('event OptionExercised(uint256 indexed optionId, address indexed buyer)'),
           args: { optionId },
-          fromBlock: 'earliest'
+          fromBlock,
         });
 
         const reclaimedLogs = await publicClient.getLogs({
           address: CONTRACT_ADDRESSES.CALL_VAULT,
           event: parseAbiItem('event UnderlyingReclaimed(uint256 indexed optionId)'),
           args: { optionId },
-          fromBlock: 'earliest'
+          fromBlock,
         });
 
         const allLogs = [...writtenLogs, ...boughtLogs, ...exercisedLogs, ...reclaimedLogs];
@@ -73,14 +91,29 @@ export default function OptionDetails() {
     fetchEvents();
   }, [publicClient, id]);
 
-  const { data: optionData, isError } = useReadContract({
+  const { data: optionData, isError, refetch: refetchOption } = useReadContract({
     address: CONTRACT_ADDRESSES.CALL_VAULT,
     abi: clawStreetCallVaultABI,
     functionName: 'options',
     args: [BigInt(id || '0')],
   });
 
-  const isMockData = isError || !optionData;
+  // Exercise option
+  const { writeContract: exerciseOpt, isPending: isExercising, data: exerciseTxHash } = useWriteContract();
+  const { isLoading: isExerciseConfirming, isSuccess: isExerciseSuccess } = useWaitForTransactionReceipt({ hash: exerciseTxHash });
+
+  useEffect(() => {
+    if (isExerciseSuccess && exerciseTxHash) {
+      toast.tx(`Option #${id} exercised!`, exerciseTxHash);
+      refetchOption();
+    }
+  }, [isExerciseSuccess, exerciseTxHash, id, refetchOption]);
+
+  const handleExercise = () => {
+    exerciseOpt({ address: CONTRACT_ADDRESSES.CALL_VAULT, abi: clawStreetCallVaultABI, functionName: 'exerciseOption', args: [BigInt(id || '0')] } as any);
+  };
+
+  const isMockData = isError && !optionData;
 
   const displayData = isMockData ? {
     writer: '0x1234567890abcdef1234567890abcdef12345678',
@@ -105,7 +138,8 @@ export default function OptionDetails() {
     exercised: optionData[7],
     active: optionData[8],
     writerReputation: 850,
-    isAgent: true
+    isAgent: !!getAgentInfo(optionData[0]),
+    agentName: getAgentInfo(optionData[0])?.name,
   };
 
   const isAvailable = displayData.buyer === '0x0000000000000000000000000000000000000000';
@@ -122,27 +156,32 @@ export default function OptionDetails() {
                       isAvailable ? 'text-green-400 bg-green-500/10 border-green-500/20' :
                       'text-base-blue bg-base-blue/10 border-base-blue/20';
 
-  // Generate mock chart data for underlying price vs strike
-  const chartData = useMemo(() => {
+  // Real Pyth ETH/USD price history for chart (replaces random-walk)
+  const [pythChartData, setPythChartData] = useState<{ date: string; price: number; strike: number }[]>([]);
+  useEffect(() => {
+    fetchPythHistory(PYTH_FEEDS.ETH_USD, 30).then(candles => {
+      if (candles.length > 0) {
+        const strike = Number(displayData.strike);
+        setPythChartData(candles.map(c => ({ date: c.date, price: Math.round(c.close), strike })));
+      }
+    }).catch(() => {});
+  }, [displayData.strike]);
+
+  // Deterministic fallback (no random)
+  const fallbackChartData = useMemo(() => {
+    const strike = Number(displayData.strike);
+    let price = strike * 0.95;
     const data = [];
-    const now = new Date();
-    // Start price slightly below strike
-    let currentPrice = Number(displayData.strike) * 0.95; 
     for (let i = 30; i >= 0; i--) {
-      const date = new Date(now);
+      const date = new Date();
       date.setDate(date.getDate() - i);
-      
-      // Add some random walk
-      currentPrice = currentPrice * (1 + (Math.random() * 0.08 - 0.035));
-      
-      data.push({
-        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        price: Math.round(currentPrice),
-        strike: Number(displayData.strike)
-      });
+      price = price * (i % 3 === 0 ? 1.015 : i % 3 === 1 ? 0.992 : 1.005);
+      data.push({ date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), price: Math.round(price), strike });
     }
     return data;
   }, [displayData.strike]);
+
+  const chartData = pythChartData.length > 0 ? pythChartData : fallbackChartData;
 
   const currentPrice = chartData[chartData.length - 1].price;
   const isITM = currentPrice > Number(displayData.strike);
@@ -150,9 +189,9 @@ export default function OptionDetails() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-      <Link to="/vault" className="inline-flex items-center text-sm text-gray-400 hover:text-white mb-8 transition-colors">
+      <Link to="/market?type=options" className="inline-flex items-center text-sm text-gray-400 hover:text-white mb-8 transition-colors">
         <ArrowLeft size={16} className="mr-2" />
-        Back to Hedge Vault
+        Back to Market
       </Link>
 
       {/* Header */}
@@ -168,6 +207,17 @@ export default function OptionDetails() {
             {displayData.amount} {displayData.underlying} @ ${displayData.strike}
           </p>
         </div>
+        {/* Exercise button — only for buyer when option is active, bought, and not expired */}
+        {!isMockData && optionData && displayData.active && !displayData.exercised && !isExpired &&
+         !isAvailable && address && displayData.buyer.toLowerCase() === address.toLowerCase() && (
+          <button
+            onClick={handleExercise}
+            disabled={isExercising || isExerciseConfirming || isExerciseSuccess}
+            className="px-5 py-2.5 bg-purple-600 text-white rounded-lg font-semibold text-sm hover:bg-purple-700 transition-colors disabled:opacity-50"
+          >
+            {isExercising || isExerciseConfirming ? 'Exercising…' : isExerciseSuccess ? 'Exercised ✓' : 'Exercise Option'}
+          </button>
+        )}
       </div>
 
       <div className="grid lg:grid-cols-3 gap-8">
@@ -215,9 +265,12 @@ export default function OptionDetails() {
               <div>
                 <span className="block text-xs text-gray-500 uppercase tracking-wider mb-1">Writer (Maker)</span>
                 <div className="bg-cyber-bg px-3 py-2 rounded border border-cyber-border font-mono text-sm text-gray-300 flex justify-between items-center">
-                  <span className="truncate mr-2">
-                    {displayData.writer}
-                    {address && displayData.writer.toLowerCase() === address.toLowerCase() && <span className="ml-2 text-xs text-base-blue font-sans">(You)</span>}
+                  <span className="truncate mr-2 flex items-center">
+                    <Link to={`/profile/${displayData.writer}`} className="hover:text-base-blue transition-colors">
+                      {typeof displayData.writer === 'string' ? `${displayData.writer.slice(0,10)}...${displayData.writer.slice(-6)}` : displayData.writer}
+                    </Link>
+                    <CopyAddress addr={typeof displayData.writer === 'string' ? displayData.writer : ''} />
+                    {address && typeof displayData.writer === 'string' && displayData.writer.toLowerCase() === address.toLowerCase() && <span className="ml-2 text-xs text-base-blue font-sans">(You)</span>}
                   </span>
                   {displayData.isAgent ? (
                     <button 
@@ -278,9 +331,16 @@ export default function OptionDetails() {
                   <span className="block text-xs text-gray-500 uppercase tracking-wider">Buyer (Taker)</span>
                   <span className="text-[10px] text-gray-600" title="Premium buyers do not require reputation scores as they hold no ongoing protocol risk.">Reputation N/A</span>
                 </div>
-                <div className="bg-cyber-bg px-3 py-2 rounded border border-cyber-border font-mono text-sm text-gray-300 truncate">
-                  {isAvailable ? 'Available for Purchase' : displayData.buyer}
-                  {address && displayData.buyer.toLowerCase() === address.toLowerCase() && <span className="ml-2 text-xs text-base-blue font-sans">(You)</span>}
+                <div className="bg-cyber-bg px-3 py-2 rounded border border-cyber-border font-mono text-sm text-gray-300 flex items-center">
+                  {isAvailable ? <span className="text-gray-500">Available for Purchase</span> : (
+                    <>
+                      <Link to={`/profile/${displayData.buyer}`} className="hover:text-base-blue transition-colors truncate">
+                        {typeof displayData.buyer === 'string' ? `${displayData.buyer.slice(0,10)}...${displayData.buyer.slice(-6)}` : displayData.buyer}
+                      </Link>
+                      <CopyAddress addr={typeof displayData.buyer === 'string' ? displayData.buyer : ''} />
+                      {address && typeof displayData.buyer === 'string' && displayData.buyer.toLowerCase() === address.toLowerCase() && <span className="ml-2 text-xs text-base-blue font-sans">(You)</span>}
+                    </>
+                  )}
                 </div>
               </div>
             </div>

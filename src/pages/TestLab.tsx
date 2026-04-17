@@ -1,5 +1,6 @@
-import { useState, useCallback } from 'react';
-import { useAccount, usePublicClient, useWalletClient } from 'wagmi';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
+import { useAccount, usePublicClient, useWalletClient, useReadContracts } from 'wagmi';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { parseUnits, formatUnits } from 'viem';
 import {
@@ -9,11 +10,12 @@ import {
   clawStreetCallVaultABI,
   clawTokenABI,
   erc20ABI,
+  KNOWN_AGENTS,
 } from '../config/contracts';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'browser' | 'live';
+type Tab = 'overview' | 'browser' | 'live' | 'automation';
 type Category = 'Happy Path' | 'Edge Case' | 'Fuzz' | 'Invariant';
 
 interface TestEntry {
@@ -231,9 +233,10 @@ const DEPLOYED_CONTRACTS = [
 
 function TabBar({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
   const tabs: { id: Tab; label: string; desc: string }[] = [
-    { id: 'overview', label: '① Overview',         desc: 'Stats & contracts' },
-    { id: 'browser',  label: '② Test Browser',     desc: 'All 284 tests' },
-    { id: 'live',     label: '③ Live Testnet',      desc: 'Wallet required' },
+    { id: 'overview',   label: '① Overview',         desc: 'Stats & contracts' },
+    { id: 'browser',    label: '② Test Browser',     desc: 'All 284 tests' },
+    { id: 'live',       label: '③ Live Testnet',      desc: 'Wallet required' },
+    { id: 'automation', label: '④ Automation',        desc: 'CTP daemon & reports' },
   ];
   return (
     <div className="flex gap-2 flex-wrap">
@@ -356,6 +359,101 @@ function OverviewMode() {
             </div>
           ))}
         </div>
+      </div>
+
+      {/* Agent Status */}
+      <AgentStatusPanel />
+
+      {/* Seed Protocol */}
+      <div className="bg-cyber-surface border border-cyber-border rounded-xl p-4">
+        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-widest mb-3">Seed Protocol</h3>
+        <p className="text-xs text-gray-400 mb-4">
+          Fire real Base Sepolia transactions from all 5 agent wallets to populate the Market with live deals.
+          Requires <code className="bg-black/30 px-1 rounded">.env.agents</code> with agent private keys.
+        </p>
+        <div className="space-y-2 mb-4">
+          {[
+            { label: 'All scenarios', cmd: 'npm run seed' },
+            { label: 'Dry-run (check balances)', cmd: 'npm run seed:check' },
+            { label: 'Loans only', cmd: 'npm run seed:loans' },
+            { label: 'Options only', cmd: 'npm run seed:options' },
+          ].map(({ label, cmd }) => (
+            <div key={cmd} className="flex items-center justify-between py-1.5 border-b border-cyber-border/30 last:border-0">
+              <span className="text-xs text-gray-500 w-36 shrink-0">{label}</span>
+              <code className="text-xs text-gray-200 font-mono flex-1 mx-3">{cmd}</code>
+              <button
+                onClick={() => navigator.clipboard.writeText(cmd)}
+                className="text-xs px-2 py-0.5 bg-white/5 text-gray-400 rounded hover:bg-base-blue/20 hover:text-base-blue transition-colors shrink-0"
+              >
+                Copy
+              </button>
+            </div>
+          ))}
+        </div>
+        <Link
+          to="/agents"
+          className="inline-flex items-center gap-1.5 text-xs text-base-blue/70 hover:text-base-blue transition-colors"
+        >
+          View live agent balances →
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+// ─── Agent Status mini-panel (used in OverviewMode) ───────────────────────────
+
+function AgentStatusPanel() {
+  const balanceCalls = KNOWN_AGENTS.flatMap(a => [
+    { address: CONTRACT_ADDRESSES.CLAW_TOKEN as `0x${string}`, abi: clawTokenABI, functionName: 'balanceOf' as const, args: [a.address] as const },
+    { address: CONTRACT_ADDRESSES.MOCK_USDC  as `0x${string}`, abi: erc20ABI,     functionName: 'balanceOf' as const, args: [a.address] as const },
+  ]);
+
+  const { data: balances, isLoading } = useReadContracts({
+    contracts: balanceCalls,
+    query: { refetchInterval: 30_000 },
+  });
+
+  return (
+    <div className="bg-cyber-surface border border-cyber-border rounded-xl p-4">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-widest">Agent Status</h3>
+        <Link to="/agents" className="text-xs text-base-blue/70 hover:text-base-blue transition-colors">
+          Full Observatory →
+        </Link>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+        {KNOWN_AGENTS.map((agent, idx) => {
+          const streetRaw = balances?.[idx * 2]?.result as bigint | undefined;
+          const usdcRaw   = balances?.[idx * 2 + 1]?.result as bigint | undefined;
+          const street = streetRaw !== undefined ? Number(formatUnits(streetRaw, 18)).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—';
+          const usdc   = usdcRaw   !== undefined ? Number(formatUnits(usdcRaw, 6)).toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—';
+          const isPlaceholder = agent.address.startsWith('0x000000000000000000000000000000000000000');
+
+          return (
+            <div key={agent.address} className="bg-cyber-bg/50 rounded-lg px-3 py-2.5 flex flex-col gap-1">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-white truncate">{agent.name}</span>
+                {!isPlaceholder && (
+                  <a href={`${BASESCAN}${agent.address}`} target="_blank" rel="noopener noreferrer" className="text-gray-600 hover:text-gray-400 flex-shrink-0 ml-1">
+                    <span className="text-[10px]">↗</span>
+                  </a>
+                )}
+              </div>
+              <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                {isLoading ? (
+                  <span className="inline-block w-16 h-2.5 bg-white/5 rounded animate-pulse" />
+                ) : (
+                  <>
+                    <span><span className="text-white">{street}</span> $STREET</span>
+                    <span><span className="text-white">${usdc}</span> USDC</span>
+                  </>
+                )}
+              </div>
+              {isPlaceholder && <span className="text-[10px] text-yellow-500/60">placeholder addr</span>}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -777,6 +875,433 @@ function LiveTestnetMode() {
   );
 }
 
+// ─── Mode 4: Automation ───────────────────────────────────────────────────────
+
+type RunnerState = 'idle' | 'planning' | 'executing' | 'open_window' | 'monitoring' | 'settling' | 'reporting';
+
+interface OpenDeal { type: 'loan' | 'option'; id: number; windowEndsAt: string; }
+interface CycleStatus {
+  state: RunnerState;
+  cycleId: string | null;
+  scenario: string | null;
+  openDeals: OpenDeal[];
+  transactions: { hash: string; label: string; agent: string; basescanUrl: string }[];
+  nextScheduledAt: string | null;
+  ethBudget: Record<string, string>;
+  lastError?: string;
+}
+interface ReportMeta {
+  filename: string; cycleId: string; scenario: string; status: string;
+  durationSeconds: number; txCount: number; dealCount: number;
+  organicParticipants: number; automatedParticipants: number;
+  totalEthSpent: string; usdcVolume: string; nextScheduledAt: string;
+  externalAddresses?: string[];
+}
+
+interface FullReport extends ReportMeta {
+  transactions: { hash: string; label: string; agent: string; gasUsed: string; basescanUrl: string }[];
+  deals: {
+    type: string; id: number; outcome: string; organicParticipation: boolean;
+    openWindowSeconds: number; principalUsdc?: string; interestUsdc?: string;
+    premiumUsdc?: string; strikeUsdc?: string;
+    participants: { address: string; role: string; isAgent: boolean; agentName?: string; pnlUsdc: string; pnlNote: string }[];
+  }[];
+  ethSpent: Record<string, string>;
+}
+
+const STATE_COLORS: Record<RunnerState, string> = {
+  idle:        'bg-gray-500/20 text-gray-400 border-gray-500/30',
+  planning:    'bg-blue-500/20 text-blue-400 border-blue-500/30',
+  executing:   'bg-base-blue/20 text-base-blue border-base-blue/30',
+  open_window: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+  monitoring:  'bg-purple-500/20 text-purple-400 border-purple-500/30',
+  settling:    'bg-orange-500/20 text-orange-400 border-orange-500/30',
+  reporting:   'bg-green-500/20 text-green-400 border-green-500/30',
+};
+
+function CountdownTimer({ endsAt }: { endsAt: string }) {
+  const [secs, setSecs] = useState(0);
+  useEffect(() => {
+    const update = () => {
+      const diff = Math.max(0, Math.round((new Date(endsAt).getTime() - Date.now()) / 1000));
+      setSecs(diff);
+    };
+    update();
+    const id = setInterval(update, 1000);
+    return () => clearInterval(id);
+  }, [endsAt]);
+  const m = Math.floor(secs / 60);
+  const s = secs % 60;
+  return <span className="font-mono text-yellow-300">{m}:{String(s).padStart(2, '0')}</span>;
+}
+
+function AutomationMode() {
+  const [status, setStatus] = useState<CycleStatus | null>(null);
+  const [reports, setReports] = useState<ReportMeta[]>([]);
+  const [triggering, setTriggering] = useState(false);
+  const [expandedReport, setExpandedReport] = useState<string | null>(null);
+  const [expandedReportData, setExpandedReportData] = useState<Record<string, unknown> | null>(null);
+  const pollRef = useRef<number | null>(null);
+
+  const fetchStatus = useCallback(async () => {
+    try {
+      const r = await fetch('/api/cycle/status');
+      if (r.ok) setStatus(await r.json());
+    } catch {}
+  }, []);
+
+  const fetchReports = useCallback(async () => {
+    try {
+      const r = await fetch('/api/cycle/reports');
+      if (r.ok) setReports(await r.json());
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    fetchStatus();
+    fetchReports();
+    pollRef.current = window.setInterval(() => {
+      fetchStatus();
+      fetchReports();
+    }, 10_000);
+    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+  }, [fetchStatus, fetchReports]);
+
+  const triggerCycle = async () => {
+    setTriggering(true);
+    try {
+      const r = await fetch('/api/cycle/trigger', { method: 'POST' });
+      // Guard: parse JSON defensively — server might return empty body on error
+      let data: { message?: string; error?: string } = {};
+      try { data = await r.json(); } catch {}
+      if (r.status === 202) {
+        setTimeout(fetchStatus, 2000);
+      } else if (r.status === 409) {
+        // Already running — just poll for status
+        setTimeout(fetchStatus, 1000);
+      } else {
+        alert(data.message ?? data.error ?? `Server returned HTTP ${r.status}`);
+      }
+    } catch (e) {
+      alert('Network error — is the dev server running? ' + String(e));
+    } finally {
+      setTimeout(() => setTriggering(false), 3000);
+    }
+  };
+
+  const loadFullReport = async (filename: string) => {
+    if (expandedReport === filename) { setExpandedReport(null); setExpandedReportData(null); return; }
+    try {
+      const r = await fetch(`/api/cycle/reports/${filename}`);
+      if (r.ok) { setExpandedReportData(await r.json()); setExpandedReport(filename); }
+    } catch {}
+  };
+
+  const downloadReport = (data: Record<string, unknown>, filename: string) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const state: RunnerState = status?.state ?? 'idle';
+  const isOpenWindow = state === 'open_window';
+  const isActive = state !== 'idle';
+
+  return (
+    <div className="space-y-5">
+
+      {/* Section A — Cycle Status */}
+      <div className="bg-cyber-surface border border-cyber-border rounded-xl p-5 space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-widest">Cycle Status</h3>
+          <button
+            onClick={triggerCycle}
+            disabled={triggering || isActive}
+            className={`text-xs px-4 py-2 rounded-lg font-semibold border transition-all ${
+              isActive
+                ? 'bg-white/5 border-white/10 text-gray-600 cursor-not-allowed'
+                : triggering
+                ? 'bg-base-blue/20 border-base-blue text-base-blue cursor-wait'
+                : 'bg-base-blue text-white border-base-blue hover:bg-base-blue/80'
+            }`}
+          >
+            {triggering ? 'Starting…' : isActive ? 'Cycle Running…' : 'Run Cycle Now'}
+          </button>
+        </div>
+
+        <div className="flex flex-wrap gap-3 items-center">
+          <span className={`text-xs px-3 py-1.5 rounded-full border font-semibold uppercase tracking-wider ${STATE_COLORS[state]} ${isActive ? 'animate-pulse' : ''}`}>
+            {state.replace('_', ' ')}
+          </span>
+          {status?.cycleId && (
+            <span className="text-xs text-gray-500 font-mono">{status.cycleId.slice(0, 19)}</span>
+          )}
+          {status?.scenario && (
+            <span className="text-xs px-2 py-0.5 bg-white/5 text-gray-300 rounded border border-white/10">
+              {status.scenario}
+            </span>
+          )}
+        </div>
+
+        {status?.nextScheduledAt && state === 'idle' && (
+          <p className="text-xs text-gray-500">
+            Next scheduled: <span className="text-gray-300">{new Date(status.nextScheduledAt).toLocaleString()}</span>
+          </p>
+        )}
+        {status?.lastError && state === 'idle' && (
+          <p className="text-xs text-red-400 bg-red-500/5 border border-red-500/20 rounded px-3 py-2">
+            Last error: {status.lastError}
+          </p>
+        )}
+
+        {/* Quick commands */}
+        <div className="pt-2 border-t border-cyber-border/40">
+          <p className="text-xs text-gray-500 mb-2 uppercase tracking-wider">Run from terminal</p>
+          <div className="space-y-1.5">
+            {[
+              { label: 'One cycle',       cmd: 'npm run runner:once' },
+              { label: 'Dev mode (5min)', cmd: 'npm run runner:dev' },
+              { label: 'Production (1h)', cmd: 'npm run runner:schedule' },
+              { label: 'Custom interval', cmd: 'tsx scripts/agent-runner.ts --interval 1800 --open-window 600' },
+            ].map(({ label, cmd }) => (
+              <div key={cmd} className="flex items-center justify-between gap-2 py-1 border-b border-cyber-border/20 last:border-0">
+                <span className="text-xs text-gray-500 w-32 shrink-0">{label}</span>
+                <code className="text-xs text-gray-200 font-mono flex-1 mx-2 truncate">{cmd}</code>
+                <button
+                  onClick={() => navigator.clipboard.writeText(cmd)}
+                  className="text-xs px-2 py-0.5 bg-white/5 text-gray-400 rounded hover:bg-base-blue/20 hover:text-base-blue transition-colors shrink-0"
+                >Copy</button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Section B — Open Window Banner */}
+      {isOpenWindow && status?.openDeals && status.openDeals.length > 0 && (
+        <div className="bg-yellow-500/5 border border-yellow-500/30 rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-yellow-400 animate-pulse shrink-0" />
+            <h3 className="text-sm font-bold text-yellow-400">
+              OPEN WINDOW ACTIVE — <CountdownTimer endsAt={status.openDeals[0].windowEndsAt} /> remaining
+            </h3>
+          </div>
+          <p className="text-xs text-gray-400">
+            External participation welcome! The following deals are open on-chain — any wallet on Base Sepolia can participate via the Market.
+          </p>
+          <div className="space-y-2">
+            {status.openDeals.map(deal => (
+              <div key={`${deal.type}-${deal.id}`} className="flex items-center justify-between gap-3 bg-yellow-500/5 border border-yellow-500/20 rounded-lg px-3 py-2">
+                <div>
+                  <span className="text-xs font-semibold text-yellow-300 uppercase">{deal.type} #{deal.id}</span>
+                  <span className="text-xs text-gray-400 ml-2">— open for external {deal.type === 'loan' ? 'funding' : 'purchase'}</span>
+                </div>
+                <Link
+                  to="/market"
+                  className="text-xs px-3 py-1.5 bg-base-blue text-white rounded-lg font-semibold hover:bg-base-blue/80 transition-colors shrink-0"
+                >
+                  Go to Market →
+                </Link>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Section C — ETH Budget Monitor */}
+      <div className="bg-cyber-surface border border-cyber-border rounded-xl p-4">
+        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-widest mb-3">Agent ETH Budget</h3>
+        {!status?.ethBudget || Object.keys(status.ethBudget).length === 0 ? (
+          <p className="text-xs text-gray-500">Run a cycle to see agent balances.</p>
+        ) : (
+          <div className="space-y-2">
+            {Object.entries(status!.ethBudget).map(([agent, ethStr]) => {
+              const eth = parseFloat(ethStr);
+              const ok = eth >= 0.003;
+              const low = eth >= 0.001 && eth < 0.003;
+              const crit = eth < 0.001;
+              return (
+                <div key={agent} className="flex items-center justify-between py-1.5 border-b border-cyber-border/30 last:border-0">
+                  <span className="text-xs text-gray-300">{agent}</span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-mono text-white">{ethStr} ETH</span>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full border ${
+                      ok   ? 'bg-green-500/15 text-green-400 border-green-500/20' :
+                      low  ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20' :
+                             'bg-red-500/15 text-red-400 border-red-500/20'
+                    }`}>
+                      {ok ? 'OK' : low ? 'LOW' : 'CRITICAL'}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <p className="text-xs text-gray-600 mt-3">
+          Threshold: OK ≥ 0.003 ETH · LOW 0.001–0.003 ETH · CRITICAL &lt; 0.001 ETH
+          <span className="ml-2">· Faucet: <a href="https://www.alchemy.com/faucets/base-sepolia" target="_blank" rel="noopener noreferrer" className="text-base-blue hover:underline">Alchemy Base Sepolia</a></span>
+        </p>
+      </div>
+
+      {/* Section D — Recent Cycle Reports */}
+      <div className="bg-cyber-surface border border-cyber-border rounded-xl p-4">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-widest">Recent Cycle Reports</h3>
+          <button onClick={fetchReports} className="text-xs text-gray-500 hover:text-gray-300 transition-colors">Refresh</button>
+        </div>
+
+        {reports.length === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-xs text-gray-500">No cycle reports yet.</p>
+            <p className="text-xs text-gray-600 mt-1">Run <code className="bg-black/30 px-1 rounded">npm run runner:once</code> to generate the first report.</p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {reports.slice(0, 10).map(r => (
+              <div key={r.filename} className="rounded-lg border border-cyber-border/40 overflow-hidden">
+                <button
+                  onClick={() => loadFullReport(r.filename)}
+                  className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-white/3 transition-colors"
+                >
+                  <div className="flex items-center gap-3 flex-wrap min-w-0">
+                    <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold shrink-0 ${
+                      r.status === 'complete' ? 'bg-green-500/15 text-green-400 border-green-500/20' :
+                      r.status === 'partial'  ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/20' :
+                                                'bg-red-500/15 text-red-400 border-red-500/20'
+                    }`}>{r.status}</span>
+                    <span className="text-xs font-mono text-gray-400 truncate">{r.cycleId?.slice(0, 19)}</span>
+                    <span className="text-xs text-gray-500">{r.scenario}</span>
+                  </div>
+                  <div className="flex items-center gap-4 shrink-0 text-xs text-gray-500">
+                    <span>{r.txCount} txs</span>
+                    <span>{r.durationSeconds}s</span>
+                    <span className={r.organicParticipants > 0 ? 'text-yellow-400' : ''}>
+                      {r.organicParticipants} organic
+                    </span>
+                    <span>{expandedReport === r.filename ? '▲' : '▼'}</span>
+                  </div>
+                </button>
+
+                {expandedReport === r.filename && expandedReportData && (
+                  <div className="px-4 pb-4 border-t border-cyber-border/30 space-y-4 pt-3">
+                    {/* Stats row */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                      <div><span className="text-gray-500">USDC Volume</span><br/><span className="text-white font-semibold">${r.usdcVolume}</span></div>
+                      <div><span className="text-gray-500">ETH Spent</span><br/><span className="text-white font-semibold">{r.totalEthSpent} ETH</span></div>
+                      <div><span className="text-gray-500">Organic</span><br/><span className={`font-semibold ${r.organicParticipants > 0 ? 'text-yellow-400' : 'text-white'}`}>{r.organicParticipants}</span></div>
+                      <div><span className="text-gray-500">Automated</span><br/><span className="text-white font-semibold">{r.automatedParticipants}</span></div>
+                    </div>
+
+                    {/* External addresses */}
+                    {(expandedReportData as FullReport).externalAddresses?.length > 0 && (
+                      <div className="p-2 bg-yellow-500/5 border border-yellow-500/20 rounded-lg">
+                        <p className="text-[10px] text-yellow-400 font-semibold uppercase tracking-wider mb-1">External Participants</p>
+                        {(expandedReportData as FullReport).externalAddresses.map((addr, i) => (
+                          <p key={i} className="text-xs font-mono text-yellow-300">{addr}</p>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Deals with participants */}
+                    {(expandedReportData as FullReport).deals?.length > 0 && (
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Deals & Participants</p>
+                        <div className="space-y-3">
+                          {(expandedReportData as FullReport).deals.map((deal, i) => (
+                            <div key={i} className="bg-black/20 rounded-lg p-3 border border-cyber-border/30">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase ${deal.type === 'loan' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-purple-500/10 text-purple-400 border-purple-500/20'}`}>{deal.type}</span>
+                                <span className="text-xs text-white">#{deal.id}</span>
+                                <span className={`text-[10px] px-1.5 py-0.5 rounded border ${deal.organicParticipation ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' : 'bg-gray-500/10 text-gray-400 border-gray-500/20'}`}>
+                                  {deal.organicParticipation ? 'ORGANIC' : 'AUTO'}
+                                </span>
+                                <span className="text-[10px] text-gray-500 ml-auto">{deal.outcome?.replace(/-/g, ' ')}</span>
+                              </div>
+                              {deal.participants?.length > 0 && (
+                                <table className="w-full text-[10px]">
+                                  <thead><tr className="text-gray-600">
+                                    <th className="text-left pb-1">Address</th>
+                                    <th className="text-left pb-1">Role</th>
+                                    <th className="text-left pb-1">Type</th>
+                                    <th className="text-right pb-1">Est. PnL</th>
+                                  </tr></thead>
+                                  <tbody>
+                                    {deal.participants.map((p, j) => (
+                                      <tr key={j} className="border-t border-cyber-border/20">
+                                        <td className="py-1 font-mono text-gray-400">{p.address?.slice(0,8)}...{p.address?.slice(-4)}</td>
+                                        <td className="py-1 text-gray-300 capitalize">{p.role}</td>
+                                        <td className="py-1">
+                                          {p.isAgent ? <span className="text-green-400">Agent</span> : <span className="text-yellow-400">Human</span>}
+                                        </td>
+                                        <td className={`py-1 text-right font-semibold ${p.pnlUsdc?.startsWith('+') ? 'text-green-400' : p.pnlUsdc?.startsWith('-') ? 'text-red-400' : 'text-gray-400'}`}>
+                                          {p.pnlUsdc} USDC
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Transactions */}
+                    {(expandedReportData as FullReport).transactions?.length > 0 && (
+                      <div>
+                        <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Transactions ({(expandedReportData as FullReport).transactions.length})</p>
+                        <div className="space-y-1.5">
+                          {(expandedReportData as FullReport).transactions.map((tx, i) => (
+                            <div key={i} className="flex items-center justify-between gap-2 py-1 border-b border-cyber-border/20 last:border-0">
+                              <div className="min-w-0">
+                                <p className="text-xs text-gray-200 truncate">{tx.label}</p>
+                                <p className="text-[10px] text-gray-600">{tx.agent} · {parseInt(tx.gasUsed || '0').toLocaleString()} gas</p>
+                              </div>
+                              <a href={tx.basescanUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-base-blue hover:underline shrink-0">↗</a>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      onClick={() => downloadReport(expandedReportData, r.filename)}
+                      className="text-xs px-3 py-1.5 bg-white/5 text-gray-300 border border-white/10 rounded-lg hover:bg-white/10 transition-colors"
+                    >
+                      ↓ Download JSON
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Section E — How to participate */}
+      <div className="bg-cyber-surface border border-cyber-border rounded-xl p-4">
+        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-widest mb-3">External Participation Guide</h3>
+        <div className="space-y-3 text-xs text-gray-400">
+          <p>During the <span className="text-yellow-400">open window</span>, the daemon creates real on-chain listings that any wallet can interact with:</p>
+          <ol className="list-decimal list-inside space-y-2 pl-2">
+            <li>Connect MetaMask to <span className="text-white">Base Sepolia</span> (Chain ID 84532)</li>
+            <li>Get test ETH from the <a href="https://www.alchemy.com/faucets/base-sepolia" target="_blank" rel="noopener noreferrer" className="text-base-blue hover:underline">Alchemy faucet</a></li>
+            <li>Get 1000 MockUSDC free from the <Link to="/market" className="text-base-blue hover:underline">Market faucet banner</Link> (shows when your balance is low)</li>
+            <li>Go to <Link to="/market" className="text-base-blue hover:underline">/market</Link> when the open window banner is active</li>
+            <li>Click <span className="text-white">"Fund Loan"</span> or <span className="text-white">"Buy Option"</span> on deals tagged <span className="text-yellow-400">[TEST CYCLE]</span></li>
+            <li>Your participation is recorded in the cycle report as <span className="text-yellow-400">organic</span></li>
+          </ol>
+          <p className="text-gray-600 pt-1">See <code className="bg-black/30 px-1 rounded">docs/AUTOMATION.md</code> for the complete guide including API agent participation.</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function TestLab() {
@@ -811,9 +1336,10 @@ export default function TestLab() {
       <TabBar tab={tab} setTab={setTab} />
 
       {/* Tab content */}
-      {tab === 'overview' && <OverviewMode />}
-      {tab === 'browser'  && <TestBrowserMode />}
-      {tab === 'live'     && <LiveTestnetMode />}
+      {tab === 'overview'    && <OverviewMode />}
+      {tab === 'browser'     && <TestBrowserMode />}
+      {tab === 'live'        && <LiveTestnetMode />}
+      {tab === 'automation'  && <AutomationMode />}
     </div>
   );
 }

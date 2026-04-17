@@ -2,9 +2,9 @@ import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useWriteContract, useReadContract, useAccount, useWaitForTransactionReceipt } from 'wagmi';
 import { parseUnits, formatUnits } from 'viem';
-import { CONTRACT_ADDRESSES, clawStreetCallVaultABI, erc20ABI } from '../config/contracts';
+import { CONTRACT_ADDRESSES, clawStreetCallVaultABI, erc20ABI, getAgentInfo } from '../config/contracts';
 import { Modal } from '../components/Modal';
-import { AlertCircle, ShieldCheck, User } from 'lucide-react';
+import { AlertCircle, ShieldCheck, User, Loader2, TrendingUp } from 'lucide-react';
 
 export default function HedgeVault() {
   const { address } = useAccount();
@@ -24,8 +24,10 @@ export default function HedgeVault() {
     functionName: 'optionCounter',
   });
 
-  const isMockData = isCounterError || optionCounter === undefined || Number(optionCounter) === 0;
-  const totalOptions = isMockData ? 3 : Number(optionCounter);
+  const isLoading = optionCounter === undefined && !isCounterError;
+  const isMockData = isCounterError;
+  const isEmpty = !isLoading && !isMockData && Number(optionCounter ?? 0) === 0;
+  const totalOptions = isMockData ? 3 : Number(optionCounter ?? 0);
   const optionIds = Array.from({ length: totalOptions }, (_, i) => i);
 
   // Write Hooks
@@ -66,18 +68,18 @@ export default function HedgeVault() {
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
       {isMockData && (
-        <div className="mb-6 p-4 bg-yellow-500/10 border border-yellow-500/20 rounded-lg flex items-center space-x-3 text-yellow-500 text-sm">
+        <div className="mb-6 p-4 bg-orange-500/10 border border-orange-500/20 rounded-lg flex items-center space-x-3 text-orange-400 text-sm">
           <AlertCircle size={18} />
-          <span>Smart contracts not detected on this network. Displaying placeholder options.</span>
+          <span>RPC unavailable — showing demo data. Set <code className="font-mono bg-orange-500/10 px-1 rounded">VITE_BASE_SEPOLIA_RPC</code> in <code className="font-mono bg-orange-500/10 px-1 rounded">.env</code> for reliable reads.</span>
         </div>
       )}
 
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end mb-8 gap-4">
         <div>
           <h1 className="text-3xl font-bold mb-2 text-white">Hedge Vault</h1>
-          <p className="text-gray-400 text-sm">Write covered calls to earn premium, or buy calls for upside protection.</p>
+          <p className="text-gray-400 text-sm">Write covered calls to earn premium, or buy calls for upside protection.{!isMockData && !isLoading && <span className="ml-2 text-green-400">● Live</span>}</p>
         </div>
-        <button 
+        <button
           onClick={() => setIsWriteModalOpen(true)}
           className="px-5 py-2.5 bg-base-blue text-white rounded-lg font-medium text-sm hover:bg-base-dark transition-colors shadow-lg shadow-base-blue/20"
         >
@@ -85,11 +87,34 @@ export default function HedgeVault() {
         </button>
       </div>
 
-      <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {optionIds.map((id) => (
-          <OptionCard key={id} id={id} isMock={isMockData} />
-        ))}
-      </div>
+      {isLoading && (
+        <div className="flex items-center justify-center py-20 text-gray-500">
+          <Loader2 className="animate-spin mr-3" size={20} />
+          <span className="text-sm">Reading from Base Sepolia...</span>
+        </div>
+      )}
+
+      {isEmpty && (
+        <div className="text-center py-20 border border-dashed border-cyber-border rounded-xl">
+          <TrendingUp className="mx-auto mb-4 text-gray-600" size={40} />
+          <h3 className="text-lg font-semibold text-white mb-2">No options written yet</h3>
+          <p className="text-gray-500 text-sm mb-6">Write the first covered call, or run <code className="font-mono bg-cyber-surface px-1.5 py-0.5 rounded text-gray-300">npm run seed:options</code> to generate agent activity.</p>
+          <button
+            onClick={() => setIsWriteModalOpen(true)}
+            className="px-5 py-2.5 bg-base-blue text-white rounded-lg font-medium text-sm hover:bg-base-dark transition-colors"
+          >
+            Write First Call
+          </button>
+        </div>
+      )}
+
+      {!isLoading && !isEmpty && (
+        <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {optionIds.map((id) => (
+            <OptionCard key={id} id={id} isMock={isMockData} />
+          ))}
+        </div>
+      )}
 
       <Modal isOpen={isWriteModalOpen} onClose={() => setIsWriteModalOpen(false)} title="Write Covered Call">
         {isWriteSuccess && (
@@ -202,7 +227,8 @@ function OptionCard({ id, isMock }: { id: number, isMock: boolean, key?: React.K
     } as any);
   };
 
-  const isAgent = id % 2 === 0; // Mock logic
+  const mockIsAgent = id % 2 === 0;
+  const realIsAgent = optionData ? !!getAgentInfo(optionData[0]) : false;
 
   const displayData = isMock ? {
     writer: '0x1234...5678',
@@ -215,7 +241,7 @@ function OptionCard({ id, isMock }: { id: number, isMock: boolean, key?: React.K
     active: true,
     exercised: false,
     buyer: '0x0000000000000000000000000000000000000000',
-    isAgent
+    isAgent: mockIsAgent,
   } : optionData ? {
     writer: `${optionData[0].slice(0,6)}...${optionData[0].slice(-4)}`,
     underlying: `${optionData[2].slice(0,6)}...`,
@@ -227,7 +253,7 @@ function OptionCard({ id, isMock }: { id: number, isMock: boolean, key?: React.K
     active: optionData[8],
     exercised: optionData[7],
     buyer: optionData[1],
-    isAgent: true
+    isAgent: realIsAgent,
   } : null;
 
   if (!displayData) return null;

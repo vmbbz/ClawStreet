@@ -1,5 +1,6 @@
 import { useState, useEffect, ReactNode } from 'react';
-import { useAccount, useReadContract, useReadContracts, usePublicClient } from 'wagmi';
+import { Link } from 'react-router-dom';
+import { useAccount, useReadContract, useReadContracts } from 'wagmi';
 import { formatUnits } from 'viem';
 import {
   CONTRACT_ADDRESSES,
@@ -7,7 +8,11 @@ import {
   clawStreetStakingABI,
   clawStreetCallVaultABI,
   clawTokenABI,
+  erc20ABI,
+  KNOWN_AGENTS,
+  BASESCAN,
 } from '../config/contracts';
+import { ExternalLink, User } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -264,92 +269,88 @@ function WalletPanel() {
   );
 }
 
-// ─── Test agent registry ──────────────────────────────────────────────────────
-
-const DEMO_AGENTS: AgentRow[] = [
-  { name: 'LiquidityAgent_Alpha', address: '0xD1E84c88734013613230678B8E000dE53e4957dC', role: 'Market Maker' },
-  { name: 'ArbitrageAgent_Beta',  address: '0xBaf9d5E05d82bEA9B971B54AD148904ae25876b2', role: 'Arbitrageur' },
-  { name: 'LendingAgent_Gamma',   address: '0x37D57004FdeBd029d9fcB1Cc88e275fEafA89353', role: 'Lender' },
-  { name: 'BorrowerAgent_Delta',  address: '0x5159345B9944Ab14D05c18853923070D3EBF60ad', role: 'Borrower' },
-  { name: 'HedgeAgent_Epsilon',   address: '0x4EED792404bbC7bC98648EbE653E38995B8e3DfB', role: 'Options Writer' },
-];
+// ─── Live agent registry ──────────────────────────────────────────────────────
 
 function AgentRegistryPanel() {
-  const [agents, setAgents] = useState<AgentRow[]>(() => {
-    try {
-      const saved = localStorage.getItem('clawstreet_agents');
-      return saved ? JSON.parse(saved) : DEMO_AGENTS;
-    } catch {
-      return DEMO_AGENTS;
-    }
+  // Batch-read STREET + USDC balance for every agent
+  const balanceCalls = KNOWN_AGENTS.flatMap(a => [
+    { address: CONTRACT_ADDRESSES.CLAW_TOKEN as `0x${string}`, abi: clawTokenABI, functionName: 'balanceOf' as const, args: [a.address] as const },
+    { address: CONTRACT_ADDRESSES.MOCK_USDC as `0x${string}`,  abi: erc20ABI,     functionName: 'balanceOf' as const, args: [a.address] as const },
+  ]);
+
+  const { data: balances, isLoading } = useReadContracts({
+    contracts: balanceCalls,
+    query: { refetchInterval: 30_000 },
   });
 
-  const [editing, setEditing] = useState<number | null>(null);
-  const [draftAddr, setDraftAddr] = useState('');
-
-  const save = (idx: number) => {
-    const next = [...agents];
-    next[idx] = { ...next[idx], address: draftAddr };
-    setAgents(next);
-    localStorage.setItem('clawstreet_agents', JSON.stringify(next));
-    setEditing(null);
-  };
+  const isPlaceholder = (addr: string) =>
+    addr === '0x0000000000000000000000000000000000000001' ||
+    addr === '0x0000000000000000000000000000000000000002' ||
+    addr === '0x0000000000000000000000000000000000000003';
 
   return (
     <div className="bg-cyber-surface border border-cyber-border rounded-xl p-4">
-      <SectionHeader title="Demo Agent Wallets">
-        <span className="text-xs text-gray-500">Addresses from scripts/setup-agent-wallets.sh</span>
+      <SectionHeader title="Agent Registry — Live Balances">
+        <span className="text-xs text-gray-500">Auto-refresh 30s · Edit addresses in contracts.ts</span>
       </SectionHeader>
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="text-xs text-gray-500 uppercase border-b border-cyber-border">
-              <th className="text-left pb-2">Agent</th>
-              <th className="text-left pb-2">Role</th>
-              <th className="text-left pb-2">Address</th>
-              <th className="text-left pb-2">Actions</th>
+              <th className="text-left pb-2 pr-4">Agent</th>
+              <th className="text-left pb-2 pr-4">Role</th>
+              <th className="text-left pb-2 pr-4">Address</th>
+              <th className="text-right pb-2 pr-4">$STREET</th>
+              <th className="text-right pb-2 pr-4">USDC</th>
+              <th className="text-left pb-2">Profile</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-cyber-border/40">
-            {agents.map((agent, idx) => (
-              <tr key={agent.name} className="py-2">
-                <td className="py-2 pr-4">
-                  <span className="text-gray-200 font-medium">{agent.name}</span>
-                </td>
-                <td className="py-2 pr-4">
-                  <span className="text-xs px-2 py-0.5 bg-base-blue/10 text-base-blue rounded-full">{agent.role}</span>
-                </td>
-                <td className="py-2 pr-4">
-                  {editing === idx ? (
-                    <input
-                      className="bg-cyber-bg border border-base-blue/40 rounded px-2 py-1 text-xs font-mono text-white w-64 focus:outline-none"
-                      value={draftAddr}
-                      onChange={e => setDraftAddr(e.target.value)}
-                      placeholder="0x..."
-                    />
-                  ) : (
-                    <code className="text-xs text-gray-400 font-mono">
-                      {agent.address ? `${agent.address.slice(0, 8)}…${agent.address.slice(-6)}` : 'Not set'}
-                    </code>
-                  )}
-                </td>
-                <td className="py-2">
-                  {editing === idx ? (
-                    <div className="flex gap-2">
-                      <button onClick={() => save(idx)} className="text-xs px-2 py-1 bg-green-600/20 text-green-400 rounded hover:bg-green-600/30">Save</button>
-                      <button onClick={() => setEditing(null)} className="text-xs px-2 py-1 bg-white/5 text-gray-400 rounded hover:bg-white/10">Cancel</button>
+            {KNOWN_AGENTS.map((agent, idx) => {
+              const streetRaw = balances?.[idx * 2]?.result as bigint | undefined;
+              const usdcRaw   = balances?.[idx * 2 + 1]?.result as bigint | undefined;
+              const street = streetRaw !== undefined ? Number(formatUnits(streetRaw, 18)).toLocaleString(undefined, { maximumFractionDigits: 0 }) : '—';
+              const usdc   = usdcRaw   !== undefined ? Number(formatUnits(usdcRaw, 6)).toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—';
+              const placeholder = isPlaceholder(agent.address);
+
+              return (
+                <tr key={agent.name} className="hover:bg-white/[0.02] transition-colors">
+                  <td className="py-2.5 pr-4">
+                    <span className="text-gray-200 font-medium text-xs">{agent.name}</span>
+                  </td>
+                  <td className="py-2.5 pr-4">
+                    <span className="text-xs px-2 py-0.5 bg-base-blue/10 text-base-blue rounded-full">{agent.role}</span>
+                  </td>
+                  <td className="py-2.5 pr-4">
+                    <div className="flex items-center gap-1.5">
+                      <code className={`text-xs font-mono ${placeholder ? 'text-yellow-500/60' : 'text-gray-400'}`}>
+                        {placeholder ? 'placeholder' : `${agent.address.slice(0, 8)}…${agent.address.slice(-6)}`}
+                      </code>
+                      {!placeholder && (
+                        <a href={`${BASESCAN}/address/${agent.address}`} target="_blank" rel="noopener noreferrer" className="text-gray-600 hover:text-gray-300">
+                          <ExternalLink size={10} />
+                        </a>
+                      )}
                     </div>
-                  ) : (
-                    <button
-                      onClick={() => { setEditing(idx); setDraftAddr(agent.address); }}
-                      className="text-xs px-2 py-1 bg-white/5 text-gray-400 rounded hover:bg-white/10"
-                    >
-                      {agent.address ? 'Edit' : 'Set'}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="py-2.5 pr-4 text-right">
+                    {isLoading ? <span className="inline-block w-12 h-3 bg-white/5 rounded animate-pulse" /> : <span className="text-xs text-white">{street}</span>}
+                  </td>
+                  <td className="py-2.5 pr-4 text-right">
+                    {isLoading ? <span className="inline-block w-10 h-3 bg-white/5 rounded animate-pulse" /> : <span className="text-xs text-white">${usdc}</span>}
+                  </td>
+                  <td className="py-2.5">
+                    {placeholder ? (
+                      <span className="text-xs text-gray-600 flex items-center gap-1"><User size={10} /> —</span>
+                    ) : (
+                      <Link to={`/profile/${agent.address}`} className="text-xs text-base-blue/70 hover:text-base-blue transition-colors">
+                        View →
+                      </Link>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -361,13 +362,15 @@ function AgentRegistryPanel() {
 
 function QuickReferencePanel() {
   const cmds = [
+    { label: 'Seed testnet (all)', cmd: 'npm run seed' },
+    { label: 'Seed dry-run', cmd: 'npm run seed:check' },
+    { label: 'Seed loans only', cmd: 'npm run seed:loans' },
+    { label: 'Seed options only', cmd: 'npm run seed:options' },
+    { label: 'Deploy test tokens', cmd: 'forge script script/DeployTestTokens.s.sol --rpc-url base_sepolia --broadcast' },
     { label: 'Run all tests', cmd: 'bash scripts/run-tests.sh' },
     { label: 'Run tests verbose', cmd: 'forge test -vvv' },
-    { label: 'Run single test', cmd: 'forge test --match-test <name> -vvvv' },
     { label: 'Fuzz (1000 runs)', cmd: 'forge test --fuzz-runs 1000 --match-test "^testFuzz_"' },
     { label: 'Gas report', cmd: 'forge test --gas-report' },
-    { label: 'Create agent wallets', cmd: 'bash scripts/setup-agent-wallets.sh' },
-    { label: 'Deploy mock NFT', cmd: 'forge script script/DeployMockNFT.s.sol --rpc-url base_sepolia --broadcast' },
     { label: 'Deploy all (testnet)', cmd: 'forge script script/DeployClawStreet.s.sol --rpc-url base_sepolia --broadcast' },
   ];
 

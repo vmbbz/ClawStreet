@@ -2,8 +2,30 @@ import React from 'react';
 import { motion } from 'motion/react';
 import { Link } from 'react-router-dom';
 import { TrendingUp, Shield, Zap, ArrowRight, Code, ShieldCheck } from 'lucide-react';
+import { useReadContract } from 'wagmi';
+import { CONTRACT_ADDRESSES, clawStreetLoanABI, clawStreetCallVaultABI, KNOWN_AGENTS, PYTH_FEEDS } from '../config/contracts';
+import { usePythPrice, formatPriceUSD } from '../lib/pyth';
 
 export default function Landing() {
+  const { data: loanCounter } = useReadContract({
+    address: CONTRACT_ADDRESSES.LOAN_ENGINE,
+    abi: clawStreetLoanABI,
+    functionName: 'loanCounter',
+  });
+  const { data: optionCounter } = useReadContract({
+    address: CONTRACT_ADDRESSES.CALL_VAULT,
+    abi: clawStreetCallVaultABI,
+    functionName: 'optionCounter',
+  });
+  const { price: ethPrice } = usePythPrice(PYTH_FEEDS.ETH_USD);
+
+  const stats = [
+    { label: 'Loans Created',    value: loanCounter   !== undefined ? String(loanCounter)   : '—' },
+    { label: 'Options Written',  value: optionCounter  !== undefined ? String(optionCounter)  : '—' },
+    { label: 'Agents Active',    value: String(KNOWN_AGENTS.length) },
+    { label: 'ETH/USD',          value: ethPrice ? formatPriceUSD(ethPrice) : '—' },
+  ];
+
   return (
     <div className="relative overflow-hidden min-h-[90vh] flex flex-col justify-center">
       {/* Background effects */}
@@ -44,11 +66,26 @@ export default function Landing() {
           </motion.div>
         </div>
 
-        <motion.div 
+        {/* Live protocol stats bar */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.5, delay: 0.15 }}
+          className="mt-12 grid grid-cols-2 md:grid-cols-4 gap-3 max-w-2xl mx-auto"
+        >
+          {stats.map(({ label, value }) => (
+            <div key={label} className="bg-cyber-surface/60 border border-cyber-border rounded-xl px-4 py-3 text-center backdrop-blur-sm">
+              <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">{label}</div>
+              <div className="text-lg font-bold text-white font-mono">{value}</div>
+            </div>
+          ))}
+        </motion.div>
+
+        <motion.div
           initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.7, delay: 0.2 }}
-          className="mt-24 grid md:grid-cols-3 gap-6"
+          className="mt-16 grid md:grid-cols-3 gap-6"
         >
           <FeatureCard 
             icon={<Zap className="w-6 h-6 text-base-blue" />}
@@ -99,9 +136,9 @@ export default function Landing() {
           <div className="p-8 rounded-2xl bg-gradient-to-b from-cyber-surface to-cyber-bg border border-cyber-border relative overflow-hidden max-w-2xl mx-auto">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-lobster-orange to-transparent opacity-50"></div>
             <h2 className="text-2xl font-bold mb-3 text-white">"$PUNCH just nuked - sell everything!"</h2>
-            <p className="text-sm text-gray-400 mb-6">Join the lobster Wall Street. Stake $CLAW, govern the protocol, and earn revenue share.</p>
+            <p className="text-sm text-gray-400 mb-6">Join the lobster Wall Street. Stake $STREET, govern the protocol, and earn revenue share.</p>
             <Link to="/stake" className="inline-flex items-center space-x-2 text-base-blue font-medium hover:underline text-sm">
-              <span>Stake $CLAW Now</span>
+              <span>Stake $STREET Now</span>
               <ArrowRight size={14} />
             </Link>
           </div>

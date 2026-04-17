@@ -78,8 +78,8 @@ forge install
 ```
 ClawStreet/
 ├── contracts/                    # Production contracts
-│   ├── ClawToken.sol             # $CLAW ERC-20, 100M cap
-│   ├── ClawStreetStaking.sol     # Stake CLAW → ClawPass NFT + USDC revenue
+│   ├── ClawToken.sol             # $STREET ERC-20, 100M cap
+│   ├── ClawStreetStaking.sol     # Stake STREET → ClawPass NFT + USDC revenue
 │   ├── ClawStreetLoan.sol        # NFT-collateralised loans, Pyth oracle
 │   ├── ClawStreetCallVault.sol   # Covered call options on ERC-20s
 │   └── ClawStreetBundleVault.sol # Bundle ERC-20s + ERC-721s into one NFT
@@ -206,11 +206,11 @@ forge test --json | jq '.[] | {name: .name, status: .status}'
 
 ### `test/ClawToken.t.sol`
 
-Tests the `$CLAW` ERC-20 token.
+Tests the `$STREET` ERC-20 token.
 
 | Test | What it checks |
 |------|---------------|
-| `test_maxSupply` | MAX_SUPPLY == 100,000,000 CLAW |
+| `test_maxSupply` | MAX_SUPPLY == 100,000,000 STREET |
 | `test_initialSupply_isZero` | starts at 0 |
 | `test_mint_byOwner` | owner can mint, balance updates |
 | `test_mint_revertsWhenCapExceeded` | revert on mint past cap |
@@ -219,7 +219,7 @@ Tests the `$CLAW` ERC-20 token.
 | `test_burn_revertsInsufficientBalance` | revert if balance too low |
 | `test_transfer` | standard ERC-20 transfer |
 | `test_approve_and_transferFrom` | approval + delegated transfer |
-| `test_nameAndSymbol` | name="ClawStreet", symbol="CLAW", decimals=18 |
+| `test_nameAndSymbol` | name="ClawStreet", symbol="STREET", decimals=18 |
 
 ```bash
 forge test --match-contract ClawTokenTest -vv
@@ -237,7 +237,7 @@ Happy-path staking flows.
 | `test_stake_topUp_restartsLock` | top-up resets the 30-day lock |
 | `test_stake_onlyOneCLawPass` | one NFT per staker (no duplicates) |
 | `test_stake_revertsZero` | cannot stake 0 |
-| `test_unstake_afterLock` | CLAW returned after 30 days |
+| `test_unstake_afterLock` | STREET returned after 30 days |
 | `test_unstake_revertsBeforeLock` | reverts 1 second early |
 | `test_unstake_revertsNothingStaked` | reverts if no position |
 | `test_notifyFee_revertsUnauthorised` | only whitelisted callers |
@@ -600,7 +600,157 @@ On Windows (Task Scheduler via WSL):
 
 ---
 
-## 8. Testnet Setup
+## 8. UI Architecture
+
+The ClawStreet frontend (`src/`) is a React + Viem + wagmi v3 SPA:
+
+| Route | Page | Data source |
+|-------|------|-------------|
+| `/` | Landing | Static |
+| `/market` | Market (unified loans + options) | `loanCounter` + `optionCounter` on-chain |
+| `/portfolio` | My positions | Filtered by connected address |
+| `/loan/:id` | Loan detail + repay/cancel | `loans(id)` on-chain |
+| `/option/:id` | Option detail + exercise | `options(id)` on-chain |
+| `/agents` | Agent Observatory | Batch reads for 5 agent addresses |
+| `/stake` | Staking panel | `positions(address)` + `pendingRevenue` |
+| `/admin` | Admin dashboard | Multi-contract batch read |
+| `/profile/:address` | Agent or human profile | `getLogs` + balances |
+
+**Mock fallback:** RPC error → orange banner + demo data. Empty chain → empty state. Real data always preferred.
+
+---
+
+## 8b. Live Testnet Testing
+
+### Seed the protocol
+
+After deployment, run the seed script to create on-chain state:
+
+```bash
+npm run seed              # full seed (loans + options + staking)
+npm run seed:check        # dry run — prints plan without sending txs
+npm run seed -- --only loans
+npm run seed -- --only options
+npm run seed -- --only staking
+```
+
+The seed script is idempotent — safe to re-run. It skips steps already completed.
+
+### Verify in the UI
+
+```bash
+npm run dev
+# Connect MetaMask to Base Sepolia (chain ID 84532)
+```
+
+**Checklist:**
+- [ ] `/market` — 3 loan cards + 3 option cards (no mock banner)
+- [ ] `/loan/0` — Loan #0 active (Delta → Gamma, 500 USDC)
+- [ ] `/option/1` — Option #1 sold (Beta bought from Epsilon)
+- [ ] `/agents` — 5 agent cards with live STREET/USDC balances
+- [ ] `/stake` — Alpha's ClawPass #1 visible
+
+### Monitor balances
+
+```bash
+source .env
+RPC="${VITE_BASE_SEPOLIA_RPC:-https://sepolia.base.org}"
+USDC="0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A"
+LOAN="0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c"
+
+cast call $LOAN "loanCounter()(uint256)" --rpc-url $RPC
+cast call $LOAN "loans(uint256)(address,address,address,uint256,uint256,uint256,uint256,uint256,uint256,bool,bool)" 0 --rpc-url $RPC
+```
+
+### ETH budget
+
+Faucet limit: **0.5 ETH/day**. Each agent has ~0.008 ETH. Seed txs cost ~0.0001 ETH each — plenty of capacity.
+
+### 8c. Continuous Test Protocol (CTP) — Automated Testnet Cycling
+
+The CTP daemon replaces manual seeding with a fully automated loop that creates open
+deals, waits for external participants, auto-settles, and generates JSON reports.
+
+```bash
+# Run one cycle (creates loan + option, waits 30-min open window, auto-settles)
+npm run runner:once
+
+# Continuous scheduler (every hour, 30-min open window for external agents)
+npm run runner:schedule
+
+# Dev mode — fast cycles (every 5min, 60s open window)
+npm run runner:dev
+
+# Check cycle status via API
+curl http://localhost:3000/api/cycle/status
+
+# See cycle reports
+curl http://localhost:3000/api/cycle/reports
+```
+
+**TestLab → ④ Automation tab** shows live cycle state, open window countdown (30 min),
+per-agent ETH budget monitor, and expandable cycle reports with per-participant PnL,
+external address tracking, and Basescan links.
+
+**Open participation:** During the `open_window` phase (default 30 minutes), any wallet
+on Base Sepolia can fund an open loan or buy an open option via the Market. These are tagged
+`[TEST CYCLE]` in the market card header. The cycle report records organic vs automated
+participation with estimated PnL for each participant.
+
+**MockUSDC faucet:** External participants can get 1000 MockUSDC by visiting the Market page
+while connected. A faucet banner appears when balance < 100 USDC. Rate-limited to 1 claim per
+address per hour. Also available via API:
+```bash
+curl -X POST http://localhost:3000/api/faucet/usdc \
+  -H "Content-Type: application/json" \
+  -d '{"address": "0x<your-wallet>"}'
+```
+
+**Fund/Buy flow:** All Market page Fund Loan and Buy Option actions require a 2-step USDC
+approval flow. Step 1: approve USDC spending. Step 2: execute the action. Both steps require
+MetaMask confirmation. The UI shows which step you're on and surfaces any errors.
+
+**NFT recycling:** If Delta's NFTs are all locked in funded loans, the runner automatically
+repays Delta's oldest active loan before creating a new one. This keeps the loan scenario
+functional across many consecutive cycles.
+
+See [docs/AUTOMATION.md](./AUTOMATION.md) for the complete automation guide.
+
+---
+
+### 8d. Deal Status System
+
+The Market page tracks the lifecycle of every deal with explicit status badges.
+
+**Loans:**
+
+| Status | Condition | Badge |
+|--------|-----------|-------|
+| `OPEN` | No lender yet (`lender == 0x0`) | Green |
+| `FUNDED` | Lender has funded (`lender != 0x0`, not repaid) | Blue |
+| `REPAID` | Borrower repaid | Gray |
+| `ENDED` | Loan expired or defaulted | Red |
+
+**Options:**
+
+| Status | Condition | Badge |
+|--------|-----------|-------|
+| `OPEN` | Not yet bought | Green |
+| `SOLD` | Buyer has purchased the option | Blue |
+| `EXERCISED` | Buyer exercised the option | Purple |
+| `EXPIRED` | Past expiry, not exercised | Gray |
+
+The **Active Only** filter shows `OPEN` + `FUNDED` loans and `OPEN` + `SOLD` options.
+`[TEST CYCLE]` badges only appear on `OPEN` deals (funded/repaid deals are excluded).
+
+**Important:** The on-chain `active` boolean on `LoanEngine` is `false` for
+unfunded (open) loans and `true` for funded loans — opposite of what "active" might
+imply. The UI derives `loanStatus` from `lender address` and `repaid/active` booleans
+rather than relying on the raw `active` field.
+
+---
+
+## 9. Testnet Setup
 
 All Base Sepolia addresses are in [`config/base-sepolia.json`](../config/base-sepolia.json).
 
@@ -744,7 +894,7 @@ npm run dev
 | Panel | What it shows |
 |-------|--------------|
 | **Contract Addresses** | Each contract address with a deployed/placeholder status badge |
-| **Protocol Stats** | Live: total loans, options written, CLAW staked, revenue accumulator, pause state |
+| **Protocol Stats** | Live: total loans, options written, STREET staked, revenue accumulator, pause state |
 | **Your Position** | Connected wallet's CLAW balance, staked amount, ClawPass ID, pending USDC revenue, lock time remaining |
 | **Demo Agent Wallets** | Editable registry of your 5 test agents — saved to browser localStorage |
 | **Quick Commands** | One-click copy for every common forge/cast command |
@@ -871,4 +1021,4 @@ forge script script/DeployClawStreet.s.sol --rpc-url https://sepolia.base.org --
 
 ---
 
-*Last updated: April 2026 — ClawStreet v1 internal audit complete, 94 tests passing.*
+*Last updated: April 2026 — ClawStreet v1 internal audit complete. 284 tests passing. Live on Base Sepolia with 3 loans, 3 options, 1 staking position.*

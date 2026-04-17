@@ -12,6 +12,63 @@ export const CONTRACT_ADDRESSES = {
   MOCK_NFT:     '0x41119aAd1c69dba3934D0A061d312A52B06B27DF' as const,
 };
 
+// ─── Test tokens (deployed by script/DeployTestTokens.s.sol) ─────────────────
+// Fill in addresses after running: forge script script/DeployTestTokens.s.sol --broadcast
+export const TEST_TOKENS = {
+  WETH: '' as `0x${string}`,  // TestWETH — maps to ETH/USD Pyth feed
+  WBTC: '' as `0x${string}`,  // TestWBTC — maps to BTC/USD Pyth feed
+  LINK: '' as `0x${string}`,  // TestLINK — maps to LINK/USD Pyth feed
+};
+
+// ─── Pyth price feed IDs (same on all networks incl. Base Sepolia) ────────────
+export const PYTH_FEEDS = {
+  ETH_USD:  '0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace',
+  BTC_USD:  '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43',
+  LINK_USD: '0x8ac0c70fff57e9aefdf5edf44b51d62c2d433653cbb2cf5cc06bb115af04d221',
+} as const;
+
+// ─── Map token address → Pyth feed ID (UI price display only) ─────────────────
+// Populated lazily once TEST_TOKENS are deployed
+export const TOKEN_PRICE_FEEDS: Record<string, string> = {};
+// e.g. TOKEN_PRICE_FEEDS[TEST_TOKENS.WETH] = PYTH_FEEDS.ETH_USD
+// (set via runtime helper below to handle empty addresses gracefully)
+
+export function registerTokenFeed(tokenAddress: string, feedId: string) {
+  if (tokenAddress && tokenAddress.length === 42) {
+    TOKEN_PRICE_FEEDS[tokenAddress.toLowerCase()] = feedId;
+  }
+}
+
+// Auto-register once addresses are filled in
+if (TEST_TOKENS.WETH) registerTokenFeed(TEST_TOKENS.WETH, PYTH_FEEDS.ETH_USD);
+if (TEST_TOKENS.WBTC) registerTokenFeed(TEST_TOKENS.WBTC, PYTH_FEEDS.BTC_USD);
+if (TEST_TOKENS.LINK) registerTokenFeed(TEST_TOKENS.LINK, PYTH_FEEDS.LINK_USD);
+
+// ─── Known agent registry ─────────────────────────────────────────────────────
+// Used by Profile.tsx to distinguish agents from human users
+export type AgentInfo = {
+  name: string;
+  role: string;
+  address: `0x${string}`;
+  createdAt: string;
+};
+
+export const KNOWN_AGENTS: AgentInfo[] = [
+  { name: 'LiquidityAgent_Alpha',  role: 'Market Maker',   address: '0xD1E84c88734013613230678B8E000dE53e4957dC', createdAt: '2026-04-12' },
+  { name: 'ArbitrageAgent_Beta',   role: 'Arbitrageur',    address: '0xBaf9d5E05d82bEA9B971B54AD148904ae25876b2', createdAt: '2026-04-12' },
+  { name: 'LendingAgent_Gamma',    role: 'Lender',         address: '0x37D57004FdeBd029d9fcB1Cc88e275fEafA89353', createdAt: '2026-04-17' },
+  { name: 'BorrowerAgent_Delta',   role: 'Borrower',       address: '0x5159345B9944Ab14D05c18853923070D3EBF60ad', createdAt: '2026-04-17' },
+  { name: 'HedgeAgent_Epsilon',    role: 'Options Writer', address: '0x4EED792404bbC7bC98648EbE653E38995B8e3DfB', createdAt: '2026-04-17' },
+];
+
+export function getAgentInfo(address: string): AgentInfo | null {
+  const lower = address.toLowerCase();
+  return KNOWN_AGENTS.find(a => a.address.toLowerCase() === lower) ?? null;
+}
+
+// Base Sepolia explorer
+export const BASESCAN = 'https://sepolia.basescan.org';
+
 // ─── ClawStreetLoan ABI ───────────────────────────────────────────────────────
 // FIX: getHealthScore takes 4 params — (nftContract, nftId, principal, borrower)
 export const clawStreetLoanABI = parseAbi([
@@ -73,7 +130,7 @@ export const clawStreetBundleVaultABI = parseAbi([
   'event BundleWithdrawn(uint256 indexed tokenId, address indexed to)',
 ]);
 
-// ─── ClawToken ($CLAW) ABI ────────────────────────────────────────────────────
+// ─── ClawToken ($STREET) ABI ──────────────────────────────────────────────────
 export const clawTokenABI = parseAbi([
   'function mint(address to, uint256 amount) external',
   'function burn(uint256 amount) external',

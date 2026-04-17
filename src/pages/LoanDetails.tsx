@@ -1,10 +1,25 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useReadContract, useAccount, usePublicClient } from 'wagmi';
-import { formatUnits, parseAbiItem } from 'viem';
-import { ArrowLeft, ShieldAlert, TrendingUp, Clock, Activity, CheckCircle2, AlertTriangle, Info, ShieldCheck, ChevronDown, ChevronUp, User } from 'lucide-react';
+import { useReadContract, useAccount, usePublicClient, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
+import { formatUnits, parseUnits, parseAbiItem } from 'viem';
+import { ArrowLeft, ShieldAlert, TrendingUp, Clock, Activity, CheckCircle2, AlertTriangle, Info, ShieldCheck, ChevronDown, ChevronUp, User, Copy, Check } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
-import { CONTRACT_ADDRESSES, clawStreetLoanABI } from '../config/contracts';
+import { CONTRACT_ADDRESSES, clawStreetLoanABI, erc20ABI, getAgentInfo, PYTH_FEEDS, BASESCAN } from '../config/contracts';
+import { fetchPythHistory, fetchPythVAA } from '../lib/pyth';
+import { toast } from '../components/Toast';
+
+function CopyAddress({ addr }: { addr: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => { navigator.clipboard.writeText(addr); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+      className="ml-1.5 text-gray-600 hover:text-gray-300 transition-colors flex-shrink-0"
+      title="Copy address"
+    >
+      {copied ? <Check size={11} className="text-green-400" /> : <Copy size={11} />}
+    </button>
+  );
+}
 
 export default function LoanDetails() {
   const { id } = useParams<{ id: string }>();
@@ -73,14 +88,45 @@ export default function LoanDetails() {
     fetchEvents();
   }, [publicClient, id]);
 
-  const { data: loanData, isError } = useReadContract({
+  const { data: loanData, isError, refetch: refetchLoan } = useReadContract({
     address: CONTRACT_ADDRESSES.LOAN_ENGINE,
     abi: clawStreetLoanABI,
     functionName: 'loans',
     args: [BigInt(id || '0')],
   });
 
-  const isMockData = isError || !loanData;
+  // Repay flow: approve USDC → repayLoan
+  const { writeContract: approveRepay, data: approveTxHash } = useWriteContract();
+  const { isSuccess: isApproveSuccess } = useWaitForTransactionReceipt({ hash: approveTxHash });
+  const { writeContract: repayLoan, isPending: isRepaying, data: repayTxHash } = useWriteContract();
+  const { isLoading: isRepayConfirming, isSuccess: isRepaySuccess } = useWaitForTransactionReceipt({ hash: repayTxHash });
+  const [isRepayStep, setIsRepayStep] = useState<'idle' | 'approving' | 'repaying' | 'done'>('idle');
+
+  useEffect(() => {
+    if (isApproveSuccess && isRepayStep === 'approving' && loanData) {
+      setIsRepayStep('repaying');
+      repayLoan({ address: CONTRACT_ADDRESSES.LOAN_ENGINE, abi: clawStreetLoanABI, functionName: 'repayLoan', args: [BigInt(id || '0')] } as any);
+    }
+  }, [isApproveSuccess, isRepayStep, repayLoan, id, loanData]);
+
+  useEffect(() => {
+    if (isRepaySuccess && repayTxHash) {
+      setIsRepayStep('done');
+      toast.tx(`Loan #${id} repaid!`, repayTxHash);
+      refetchLoan();
+    }
+  }, [isRepaySuccess, repayTxHash, id, refetchLoan]);
+
+  const handleRepay = async () => {
+    if (!loanData) return;
+    const total = loanData[4] + loanData[5]; // principal + interest
+    setIsRepayStep('approving');
+    approveRepay({ address: CONTRACT_ADDRESSES.MOCK_USDC, abi: erc20ABI, functionName: 'approve', args: [CONTRACT_ADDRESSES.LOAN_ENGINE, total] } as any);
+  };
+
+  // Smart fallback: show demo only on actual RPC error, not on "loan not found"
+  const isRpcError = isError;
+  const isMockData = isRpcError && !loanData;
 
   const displayData = isMockData ? {
     borrower: '0x1234567890abcdef1234567890abcdef12345678',
@@ -108,8 +154,9 @@ export default function LoanDetails() {
     repaid: loanData[10],
     nftContract: `${loanData[2].slice(0,6)}...${loanData[2].slice(-4)}`,
     nftId: loanData[3].toString(),
-    borrowerReputation: 850, // Mocked until oracle is integrated on frontend
-    isAgent: true // In production, determine via oracle if score exists
+    borrowerReputation: 850,
+    isAgent: !!getAgentInfo(loanData[0]),
+    agentName: getAgentInfo(loanData[0])?.name,
   };
 
   const isUnfunded = displayData.lender === '0x0000000000000000000000000000000000000000';
@@ -127,32 +174,38 @@ export default function LoanDetails() {
   const totalOwed = Number(displayData.principal) + Number(displayData.interest);
   const apr = Math.round((Number(displayData.interest) / Number(displayData.principal)) * (365 / displayData.duration) * 100);
 
-  // Generate mock chart data for collateral value vs liquidation threshold
-  const chartData = useMemo(() => {
+  // Real Pyth price history for chart (ETH/USD — used as collateral oracle)
+  const [pythChartData, setPythChartData] = useState<{ date: string; value: number; threshold: number }[]>([]);
+  useEffect(() => {
+    fetchPythHistory(PYTH_FEEDS.ETH_USD, 30).then(candles => {
+      if (candles.length > 0) {
+        const threshold = Number(displayData.principal) * 1.1;
+        setPythChartData(candles.map(c => ({ date: c.date, value: Math.round(c.close), threshold })));
+      }
+    }).catch(() => {});
+  }, [displayData.principal]);
+
+  // Fallback deterministic chart (no random — avoids hydration issues)
+  const fallbackChartData = useMemo(() => {
     const data = [];
-    const now = new Date();
-    let currentValue = Number(displayData.principal) * 1.5; // Start with 150% collateralization
+    const threshold = Number(displayData.principal) * 1.1;
+    let value = Number(displayData.principal) * 1.5;
     for (let i = 30; i >= 0; i--) {
-      const date = new Date(now);
+      const date = new Date();
       date.setDate(date.getDate() - i);
-      
-      // Add some random walk to the value
-      currentValue = currentValue * (1 + (Math.random() * 0.1 - 0.04));
-      
-      data.push({
-        date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-        value: Math.round(currentValue),
-        threshold: Number(displayData.principal) * 1.1 // 110% liquidation threshold
-      });
+      value = value * (i % 2 === 0 ? 1.012 : 0.994);  // deterministic oscillation
+      data.push({ date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }), value: Math.round(value), threshold });
     }
     return data;
   }, [displayData.principal]);
+
+  const chartData = pythChartData.length > 0 ? pythChartData : fallbackChartData;
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
       <Link to="/market" className="inline-flex items-center text-sm text-gray-400 hover:text-white mb-8 transition-colors">
         <ArrowLeft size={16} className="mr-2" />
-        Back to Marketplace
+        Back to Market
       </Link>
 
       {/* Header */}
@@ -167,9 +220,20 @@ export default function LoanDetails() {
           <p className="text-gray-400">Collateral: {displayData.nftContract} (ID: {displayData.nftId})</p>
         </div>
         
-        <div className="flex space-x-3">
-          {/* Action buttons could go here if we want to duplicate them from the cards */}
-        </div>
+        {/* Repay button — only for active, funded loans where connected wallet is borrower */}
+        {!isMockData && loanData && displayData.active && !displayData.repaid && !isUnfunded &&
+         address && displayData.borrower.toLowerCase() === address.toLowerCase() && (
+          <button
+            onClick={handleRepay}
+            disabled={isRepayStep !== 'idle' || isRepaying || isRepayConfirming}
+            className="px-5 py-2.5 bg-green-600 text-white rounded-lg font-semibold text-sm hover:bg-green-700 transition-colors disabled:opacity-50"
+          >
+            {isRepayStep === 'approving' ? 'Approving USDC…' :
+             isRepayStep === 'repaying' || isRepayConfirming ? 'Repaying…' :
+             isRepayStep === 'done' ? 'Repaid ✓' :
+             `Repay ${totalOwed} USDC`}
+          </button>
+        )}
       </div>
 
       <div className="grid lg:grid-cols-3 gap-8">
@@ -215,8 +279,11 @@ export default function LoanDetails() {
               <div>
                 <span className="block text-xs text-gray-500 uppercase tracking-wider mb-1">Borrower (Maker)</span>
                 <div className="bg-cyber-bg px-3 py-2 rounded border border-cyber-border font-mono text-sm text-gray-300 flex justify-between items-center">
-                  <span className="truncate mr-2">
-                    {displayData.borrower}
+                  <span className="truncate mr-2 flex items-center">
+                    <Link to={`/profile/${displayData.borrower}`} className="hover:text-base-blue transition-colors">
+                      {displayData.borrower.slice(0,10)}...{displayData.borrower.slice(-6)}
+                    </Link>
+                    <CopyAddress addr={displayData.borrower} />
                     {address && displayData.borrower.toLowerCase() === address.toLowerCase() && <span className="ml-2 text-xs text-base-blue font-sans">(You)</span>}
                   </span>
                   {displayData.isAgent ? (
@@ -281,9 +348,16 @@ export default function LoanDetails() {
                   <span className="block text-xs text-gray-500 uppercase tracking-wider">Lender (Taker)</span>
                   <span className="text-[10px] text-gray-600" title="Capital providers do not require reputation scores as they hold no ongoing protocol risk.">Reputation N/A</span>
                 </div>
-                <div className="bg-cyber-bg px-3 py-2 rounded border border-cyber-border font-mono text-sm text-gray-300 truncate">
-                  {isUnfunded ? 'Awaiting...' : displayData.lender}
-                  {address && displayData.lender.toLowerCase() === address.toLowerCase() && <span className="ml-2 text-xs text-base-blue font-sans">(You)</span>}
+                <div className="bg-cyber-bg px-3 py-2 rounded border border-cyber-border font-mono text-sm text-gray-300 flex items-center">
+                  {isUnfunded ? <span className="text-gray-500">Awaiting...</span> : (
+                    <>
+                      <Link to={`/profile/${displayData.lender}`} className="hover:text-base-blue transition-colors truncate">
+                        {displayData.lender.slice(0,10)}...{displayData.lender.slice(-6)}
+                      </Link>
+                      <CopyAddress addr={displayData.lender} />
+                      {address && displayData.lender.toLowerCase() === address.toLowerCase() && <span className="ml-2 text-xs text-base-blue font-sans">(You)</span>}
+                    </>
+                  )}
                 </div>
               </div>
             </div>

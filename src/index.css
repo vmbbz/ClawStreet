@@ -1,18 +1,58 @@
 @import "tailwindcss";
 
+/* ─── Brand + UI tokens (shared across themes) ──────────────────────────────── */
 @theme {
   --color-base-blue: #0052FF;
   --color-base-dark: #003ECC;
   --color-lobster-orange: #ff5a00;
   --color-lobster-dark: #cc4800;
-  --color-cyber-bg: #030712;
-  --color-cyber-surface: #0f172a;
-  --color-cyber-border: #1e293b;
   --color-neon-blue: #64ffda;
+
+  /* Dark theme defaults — overridden by [data-theme="light"] below */
+  --color-cyber-bg:      #030712;
+  --color-cyber-surface: #0f172a;
+  --color-cyber-border:  #1e293b;
 }
 
+/* ─── Light mode overrides ──────────────────────────────────────────────────── */
+[data-theme="light"] {
+  --color-cyber-bg:      #f8fafc;
+  --color-cyber-surface: #ffffff;
+  --color-cyber-border:  #e2e8f0;
+}
+
+/* ─── Base styles ───────────────────────────────────────────────────────────── */
 body {
   background-color: var(--color-cyber-bg);
   color: #f8fafc;
   font-family: 'Inter', sans-serif;
+  transition: background-color 0.2s ease;
+}
+
+[data-theme="light"] body {
+  color: #0f172a;
+}
+
+/* In light mode, force readable text on elements that hardcode "text-white" */
+[data-theme="light"] .text-white {
+  color: #0f172a !important;
+}
+[data-theme="light"] .text-gray-400 {
+  color: #475569 !important;
+}
+[data-theme="light"] .text-gray-500 {
+  color: #64748b !important;
+}
+[data-theme="light"] .text-gray-300 {
+  color: #334155 !important;
+}
+
+/* Nav + card backgrounds in light */
+[data-theme="light"] nav {
+  background-color: rgba(255, 255, 255, 0.9) !important;
+  border-color: #e2e8f0 !important;
+}
+[data-theme="light"] footer {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
 }

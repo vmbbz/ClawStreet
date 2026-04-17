@@ -3,6 +3,7 @@ import { useAccount, useWriteContract, useWaitForTransactionReceipt, useReadCont
 import { parseUnits, formatUnits } from 'viem';
 import { Modal } from '../components/Modal';
 import { CONTRACT_ADDRESSES, clawTokenABI, clawStreetStakingABI } from '../config/contracts';
+import { toast } from '../components/Toast';
 
 const BASESCAN_TX = 'https://sepolia.basescan.org/tx/';
 
@@ -128,8 +129,9 @@ export default function Staking() {
     if (isStakeSuccess) {
       setStep('success');
       refetchReads();
+      if (stakeTxHash) toast.tx('Staked & ClawPass minted!', stakeTxHash);
     }
-  }, [isStakeSuccess, refetchReads]);
+  }, [isStakeSuccess, refetchReads, stakeTxHash]);
 
   // ── Error handling — any tx failure resets to error state ──────────────────
   useEffect(() => {
@@ -150,11 +152,21 @@ export default function Staking() {
 
   // ── Claim / unstake effects ─────────────────────────────────────────────────
   useEffect(() => {
-    if (isClaimSuccess || isUnstakeSuccess) refetchReads();
-  }, [isClaimSuccess, isUnstakeSuccess, refetchReads]);
+    if (isClaimSuccess) {
+      refetchReads();
+      if (claimTxHash) toast.tx('Revenue claimed!', claimTxHash);
+    }
+  }, [isClaimSuccess, refetchReads, claimTxHash]);
 
   useEffect(() => {
-    if (isClaimError) setIsClaimModalOpen(false);
+    if (isUnstakeSuccess) {
+      refetchReads();
+      if (unstakeTxHash) toast.tx('Unstaked successfully!', unstakeTxHash);
+    }
+  }, [isUnstakeSuccess, refetchReads, unstakeTxHash]);
+
+  useEffect(() => {
+    if (isClaimError) { setIsClaimModalOpen(false); toast.error('Claim failed'); }
   }, [isClaimError]);
 
   const handleStakeConfirm = () => {
@@ -205,6 +217,10 @@ export default function Staking() {
   const isBusy = isApproving || isApproveConfirming || isStaking || isStakeConfirming;
 
   const lockDays = lockLeft > 0n ? Math.ceil(Number(lockLeft) / 86400) : 0;
+  const lockProgressPct = lockLeft > 0n ? Math.min(100, Math.round(((30 - lockDays) / 30) * 100)) : 100;
+  const unlockDate = lockLeft > 0n
+    ? new Date(Date.now() + Number(lockLeft) * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+    : null;
 
   const stepLabel =
     step === 'error'   ? 'Transaction Failed' :
@@ -251,6 +267,26 @@ export default function Staking() {
               <span className={lockDays > 0 ? 'text-yellow-400 font-medium' : 'text-green-400 font-medium'}>
                 {lockDays > 0 ? `${lockDays}d remaining` : 'Unlocked'}
               </span>
+            </div>
+            {unlockDate && (
+              <div className="flex justify-between">
+                <span className="text-gray-400">Unlocks</span>
+                <span className="text-gray-300 font-mono text-xs">{unlockDate}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Lock progress bar */}
+          <div className="mb-5">
+            <div className="flex justify-between text-[10px] text-gray-500 uppercase tracking-wider mb-1.5">
+              <span>Lock Progress</span>
+              <span>{lockProgressPct}%</span>
+            </div>
+            <div className="h-1.5 bg-cyber-bg rounded-full overflow-hidden border border-cyber-border">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${lockDays === 0 ? 'bg-green-400' : 'bg-lobster-orange'}`}
+                style={{ width: `${lockProgressPct}%` }}
+              />
             </div>
           </div>
           <div className="flex gap-3">

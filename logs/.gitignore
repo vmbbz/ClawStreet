@@ -1,0 +1,8 @@
+# Keep the logs/ directory in git but ignore generated content
+# status.json and latest.json are ephemeral runtime state
+status.json
+latest.json
+# Cycle reports are local audit trail — not committed
+reports/
+# Seed script run logs
+*.log

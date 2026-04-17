@@ -176,7 +176,7 @@ forge script script/DisperseETH.s.sol \
   --broadcast \
   -vvvv
 
-# Step C: Deploy all contracts + fund agents with USDC + CLAW + NFTs
+# Step C: Deploy all contracts + fund agents with USDC + STREET + NFTs
 forge script script/DeployAll.s.sol \
   --rpc-url base_sepolia \
   --broadcast \
@@ -200,20 +200,20 @@ forge script script/DisperseUSDC.s.sol \
 |------|----------|------|------|
 | 1 | **MockUSDC** | ERC-20, 6 decimals | Mintable unlimited, owned by deployer |
 | 2 | **ClawStreetTestNFT** | ERC-721 | Borrower collateral for loans |
-| 3 | **ClawToken** ($CLAW) | ERC-20, 18 decimals | 100M max cap |
+| 3 | **ClawToken** ($STREET) | ERC-20, 18 decimals | 100M max cap |
 | 4 | **ClawStreetStaking** | ERC-721 + revenue share | Non-upgradeable |
 | 5 | **ClawStreetBundleVault** | UUPS proxy | Asset bundling |
 | 6 | **ClawStreetLoan** | UUPS proxy | NFT-collateralised loans + Pyth |
 | 7 | **ClawStreetCallVault** | UUPS proxy | Covered call options |
 | 8 | Wire: Loan → Staking | Config tx | Sets fee routing |
-| 9 | Mint 50M CLAW to deployer | Config tx | Treasury allocation |
+| 9 | Mint 50M STREET to deployer | Config tx | Treasury allocation |
 | 10 | Disperse MockUSDC to all agents | Batch mint | Uses `disperseEqual` |
 | 11 | Mint 5 test NFTs to Agent4 | Mint tx | Borrower collateral |
-| 12 | Disperse CLAW to staker agents | Mint txs | Agent1, 2, 5 |
+| 12 | Disperse STREET to staker agents | Mint txs | Agent1, 2, 5 |
 
 ### Token amounts disbursed
 
-| Recipient | ETH | MockUSDC | CLAW |
+| Recipient | ETH | MockUSDC | STREET |
 |-----------|-----|----------|------|
 | Deployer | (yours) | 10,000,000 | 50,000,000 |
 | Agent1 Alpha | 0.05 | 1,000 | 100,000 |
@@ -224,7 +224,38 @@ forge script script/DisperseUSDC.s.sol \
 
 ---
 
-## 7. Post-Deploy Configuration
+## 7. Live Deployed Addresses (Base Sepolia)
+
+> Last deployed: 2026-04-12. ClawToken + Staking redeployed 2026-04-16 for $STREET symbol.
+
+| Contract | Address | Basescan |
+|----------|---------|---------|
+| MockUSDC | `0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A` | [View ↗](https://sepolia.basescan.org/address/0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A) |
+| MockNFT | `0x41119aAd1c69dba3934D0A061d312A52B06B27DF` | [View ↗](https://sepolia.basescan.org/address/0x41119aAd1c69dba3934D0A061d312A52B06B27DF) |
+| ClawToken ($STREET) | `0xD11fC366828445B874F5202109E5f48C4D14FCe4` | [View ↗](https://sepolia.basescan.org/address/0xD11fC366828445B874F5202109E5f48C4D14FCe4) |
+| ClawStreetStaking | `0xADBf89BA38915B9CF18E0a24Ea3E27F39d920bd3` | [View ↗](https://sepolia.basescan.org/address/0xADBf89BA38915B9CF18E0a24Ea3E27F39d920bd3) |
+| ClawStreetBundleVault | `0x86ef420fD3e27c3Ac896c479B19b6A840b97Bee1` | [View ↗](https://sepolia.basescan.org/address/0x86ef420fD3e27c3Ac896c479B19b6A840b97Bee1) |
+| ClawStreetLoan | `0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c` | [View ↗](https://sepolia.basescan.org/address/0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c) |
+| ClawStreetCallVault | `0x69730728a0B19b844bc18888d2317987Bc528baE` | [View ↗](https://sepolia.basescan.org/address/0x69730728a0B19b844bc18888d2317987Bc528baE) |
+
+**Agent wallets (seeded 2026-04-17):**
+
+| Agent | Address | Role | Active Deals |
+|-------|---------|------|-------------|
+| LiquidityAgent_Alpha | `0xD1E84c88734013613230678B8E000dE53e4957dC` | Market Maker | Staked 10,000 STREET (ClawPass #1) |
+| ArbitrageAgent_Beta | `0xBaf9d5E05d82bEA9B971B54AD148904ae25876b2` | Arbitrageur | Bought Option #1 (50 USDC premium) |
+| LendingAgent_Gamma | `0x37D57004FdeBd029d9fcB1Cc88e275fEafA89353` | Lender | Funded Loan #0 (500 USDC, active) |
+| BorrowerAgent_Delta | `0x5159345B9944Ab14D05c18853923070D3EBF60ad` | Borrower | Loans #0,1,2 borrower (3 NFTs escrowed) |
+| HedgeAgent_Epsilon | `0x4EED792404bbC7bC98648EbE653E38995B8e3DfB` | Options Writer | Wrote Options #0,1,2 |
+
+**Live protocol state (Base Sepolia):**
+- **Loans:** 3 (Loan #0 active+funded, Loans #1+2 open listings)
+- **Options:** 3 (Option #1 sold to Beta, Options #0+2 open listings)
+- **Staking:** Alpha staked 10,000 STREET, holds ClawPass NFT #1
+
+---
+
+## 8. Post-Deploy Configuration
 
 After bootstrap, copy the printed addresses into two files:
 
@@ -287,7 +318,54 @@ forge script script/DisperseETH.s.sol --rpc-url base_sepolia --broadcast
 
 ---
 
-## 9. Script Reference
+## 9. Seed Protocol with Live Data
+
+After deployment, the UI reads on-chain state. Use the seed script to populate it:
+
+```bash
+# Seed all (loans + options + staking)
+npm run seed
+
+# Seed only loans
+npm run seed -- --only loans
+
+# Seed only options
+npm run seed -- --only options
+
+# Seed only staking
+npm run seed -- --only staking
+
+# Dry run — prints plan without executing
+npm run seed:check
+```
+
+The seed script is **idempotent** — safe to re-run. It detects which steps were already completed and skips them.
+
+### What the seed creates
+
+| Step | Agent | Action | Result |
+|------|-------|--------|--------|
+| 1 | Delta | `setApprovalForAll(LoanEngine, true)` | Operator approval for all NFTs |
+| 2 | Delta | `createLoanOffer(NFT#1, 500 USDC, 14d)` | Loan #0 created |
+| 3 | Gamma | `acceptLoan(0, pythVAA)` | Loan #0 funded and active |
+| 4 | Delta | `createLoanOffer(NFT#2, 300 USDC, 30d)` | Loan #1 open listing |
+| 5 | Delta | `createLoanOffer(NFT#3, 750 USDC, 21d)` | Loan #2 open listing |
+| 6 | Epsilon | `writeCoveredCall(STREET, 1e18, $2000, 7d, $50)` | Option #0 written |
+| 7 | Beta | `buyOption(0)` | Option #0 sold |
+| 8 | Epsilon | `writeCoveredCall(STREET, 0.5e18, $1500, 14d, $25)` | Option #1 open |
+| 9 | Alpha | `stake(10000 STREET)` | ClawPass #1 minted |
+
+### ETH budget
+
+Base Sepolia faucet limit: **0.5 ETH/day**. The seed script spends ~0.0005 ETH total in gas. Agents were funded with 0.008 ETH each (0.040 ETH total) which covers hundreds of seed runs.
+
+### Pyth fee
+
+`acceptLoan` requires a Pyth price update. The script automatically queries `getUpdateFee()` from the Pyth oracle and sends the exact required amount (currently 10 wei on Base Sepolia).
+
+---
+
+## 10. Script Reference
 
 ### Shell scripts (`scripts/`)
 
@@ -313,8 +391,8 @@ forge script script/DisperseETH.s.sol --rpc-url base_sepolia --broadcast
 | Contract | Description |
 |----------|-------------|
 | `MockUSDC.sol` | Mintable ERC-20 (6 dec). Has `disperseEqual` + `disperseCustom`. |
-| `ClawToken.sol` | $CLAW ERC-20, 100M cap, ownable mint. |
-| `ClawStreetStaking.sol` | Stake CLAW → ClawPass NFT + USDC revenue share. |
+| `ClawToken.sol` | $STREET ERC-20, 100M cap, ownable mint. |
+| `ClawStreetStaking.sol` | Stake STREET → ClawPass NFT + USDC revenue share. |
 | `ClawStreetLoan.sol` | NFT-collateralised loans with Pyth oracle. |
 | `ClawStreetCallVault.sol` | Covered call options on ERC-20s. |
 | `ClawStreetBundleVault.sol` | Bundle ERC-20s + ERC-721s into one NFT. |
