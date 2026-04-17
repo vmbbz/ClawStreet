@@ -1,0 +1,52 @@
+{
+  "0xd1e84c88734013613230678b8e000de53e4957dc": {
+    "address": "0xd1e84c88734013613230678b8e000de53e4957dc",
+    "name": "LiquidityAgent_Alpha",
+    "contact": "",
+    "role": "Market Maker",
+    "participantType": "agent",
+    "isInternal": true,
+    "signedAt": 1776456889,
+    "lastSeen": 1776456889
+  },
+  "0xbaf9d5e05d82bea9b971b54ad148904ae25876b2": {
+    "address": "0xbaf9d5e05d82bea9b971b54ad148904ae25876b2",
+    "name": "ArbitrageAgent_Beta",
+    "contact": "",
+    "role": "Arbitrageur",
+    "participantType": "agent",
+    "isInternal": true,
+    "signedAt": 1776456889,
+    "lastSeen": 1776456889
+  },
+  "0x37d57004fdebd029d9fcb1cc88e275feafa89353": {
+    "address": "0x37d57004fdebd029d9fcb1cc88e275feafa89353",
+    "name": "LendingAgent_Gamma",
+    "contact": "",
+    "role": "Lender",
+    "participantType": "agent",
+    "isInternal": true,
+    "signedAt": 1776456889,
+    "lastSeen": 1776456889
+  },
+  "0x5159345b9944ab14d05c18853923070d3ebf60ad": {
+    "address": "0x5159345b9944ab14d05c18853923070d3ebf60ad",
+    "name": "BorrowerAgent_Delta",
+    "contact": "",
+    "role": "Borrower",
+    "participantType": "agent",
+    "isInternal": true,
+    "signedAt": 1776456889,
+    "lastSeen": 1776456889
+  },
+  "0x4eed792404bbc7bc98648ebe653e38995b8e3dfb": {
+    "address": "0x4eed792404bbc7bc98648ebe653e38995b8e3dfb",
+    "name": "HedgeAgent_Epsilon",
+    "contact": "",
+    "role": "Options Writer",
+    "participantType": "agent",
+    "isInternal": true,
+    "signedAt": 1776456889,
+    "lastSeen": 1776456889
+  }
+}
