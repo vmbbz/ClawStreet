@@ -25,6 +25,10 @@ export interface ContactPayload {
 
 const NOTIFICATION_SECRET = process.env.NOTIFICATION_SECRET ?? 'clawstreet-dev-secret';
 
+if (!process.env.NOTIFICATION_SECRET) {
+  console.warn('[contact-notifier] NOTIFICATION_SECRET env var not set — using insecure dev default. Set this before going to production.');
+}
+
 function signPayload(body: string): string {
   return createHmac('sha256', NOTIFICATION_SECRET).update(body).digest('hex');
 }

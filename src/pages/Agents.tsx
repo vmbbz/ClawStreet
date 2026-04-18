@@ -48,12 +48,15 @@ const ROLE_STYLE: Record<string, { icon: React.ReactNode; color: string; bg: str
 
 // ─── Agent Card ───────────────────────────────────────────────────────────────
 
+interface AgentStats { loansCreated: number; loansFunded: number; optionsWritten: number; optionsSold: number; totalDeals: number; }
+
 const AgentCard: React.FC<{
   entry: AgentEntry;
   streetBalance?: bigint;
   usdcBalance?: bigint;
   loading: boolean;
-}> = ({ entry, streetBalance, usdcBalance, loading }) => {
+  stats?: AgentStats;
+}> = ({ entry, streetBalance, usdcBalance, loading, stats }) => {
   const style = ROLE_STYLE[entry.role] ?? ROLE_STYLE['Market Maker'];
   const street = streetBalance
     ? Number(formatUnits(streetBalance, 18)).toLocaleString(undefined, { maximumFractionDigits: 0 })
@@ -147,6 +150,20 @@ const AgentCard: React.FC<{
           }
         </div>
       </div>
+
+      {/* Deal counters */}
+      {stats && stats.totalDeals > 0 && (
+        <div className="grid grid-cols-2 gap-2">
+          <div className="bg-cyber-bg/50 rounded-md px-2.5 py-1.5 text-center">
+            <div className="text-[9px] text-gray-600 uppercase tracking-wider">Loans</div>
+            <div className="text-xs font-semibold text-white">{stats.loansCreated + stats.loansFunded}</div>
+          </div>
+          <div className="bg-cyber-bg/50 rounded-md px-2.5 py-1.5 text-center">
+            <div className="text-[9px] text-gray-600 uppercase tracking-wider">Options</div>
+            <div className="text-xs font-semibold text-white">{stats.optionsWritten + stats.optionsSold}</div>
+          </div>
+        </div>
+      )}
 
       {/* Last seen (external only) */}
       {!isInternal && (
@@ -312,12 +329,27 @@ function AnnouncePanel({ onSuccess }: { onSuccess: () => void }) {
 export default function Agents() {
   const [registry, setRegistry] = useState<AgentEntry[]>([]);
   const [registryLoading, setRegistryLoading] = useState(true);
+  const [statsMap, setStatsMap] = useState<Map<string, AgentStats>>(new Map());
 
   async function fetchRegistry() {
     try {
       setRegistryLoading(true);
       const res = await fetch('/api/agents');
-      if (res.ok) setRegistry(await res.json());
+      if (res.ok) {
+        const entries: AgentEntry[] = await res.json();
+        setRegistry(entries);
+        // Fetch stats for all entries in parallel (best-effort)
+        const results = await Promise.allSettled(
+          entries.map(e => fetch(`/api/agents/${e.address}/stats`).then(r => r.json()))
+        );
+        const map = new Map<string, AgentStats>();
+        results.forEach((r, i) => {
+          if (r.status === 'fulfilled' && r.value && !r.value.error) {
+            map.set(entries[i].address.toLowerCase(), r.value as AgentStats);
+          }
+        });
+        setStatsMap(map);
+      }
     } finally {
       setRegistryLoading(false);
     }
@@ -432,6 +464,7 @@ export default function Agents() {
                   streetBalance={balances?.[idx * 2]?.result as bigint | undefined}
                   usdcBalance={balances?.[idx * 2 + 1]?.result as bigint | undefined}
                   loading={balancesLoading}
+                  stats={statsMap.get(entry.address.toLowerCase())}
                 />
               );
             })}
@@ -471,6 +504,7 @@ export default function Agents() {
                   streetBalance={balances?.[idx * 2]?.result as bigint | undefined}
                   usdcBalance={balances?.[idx * 2 + 1]?.result as bigint | undefined}
                   loading={balancesLoading}
+                  stats={statsMap.get(entry.address.toLowerCase())}
                 />
               );
             })}

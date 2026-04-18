@@ -50,7 +50,15 @@
       "Bash(vercel whoami:*)",
       "Bash(vercel link:*)",
       "Bash(vercel --prod)",
-      "Bash(find /c/Users/cosyc/ClawStreet/contracts -type f -name *.sol)"
+      "Bash(find /c/Users/cosyc/ClawStreet/contracts -type f -name *.sol)",
+      "Bash(npx tsx:*)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d, indent=2\\)\\)\")",
+      "Bash(grep -r \"block\\\\|deploy\" scripts/ --include=*.ts -l)",
+      "Bash(ls logs/*.json)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\({k: d[k] for k in list\\(d.keys\\(\\)\\)[:15]}, indent=2\\)\\)\")",
+      "Bash(grep -r \"createDeal\\\\|postDeal\\\\|createLoan\\\\|submitLoan\\\\|POST.*deal\\\\|POST.*loan\" /c/Users/cosyc/ClawStreet/server.ts /c/Users/cosyc/ClawStreet/scripts/*.ts)",
+      "Bash(grep -E \"\\\\.ts$\")",
+      "Bash(node -e \"console.log\\(require\\(''crypto''\\).randomBytes\\(32\\).toString\\(''hex''\\)\\)\")"
     ]
   }
 }

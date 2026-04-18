@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { usePublicClient, useReadContracts, useAccount, useSignMessage } from 'wagmi';
 import { formatUnits, parseAbiItem, type Address } from 'viem';
@@ -50,144 +50,157 @@ async function fetchAddressEvents(
   address: Address
 ): Promise<DealEvent[]> {
   if (!publicClient) return [];
+
+  const seen   = new Set<string>();
   const events: DealEvent[] = [];
-  const seen = new Set<string>(); // deduplicate by txHash
 
   try {
     const currentBlock = await publicClient.getBlockNumber();
 
-    // Public RPC limits eth_getLogs to 10,000 blocks.
-    // We scan 3 consecutive 9,500-block windows (~14 hours of history on Base Sepolia
-    // at ~2s/block) to catch older agent transactions that have drifted out of the
-    // most-recent window.
+    // 3 sequential windows covering ~8h of recent history (timeline only — counts come from readContract).
+    // Sequential to avoid rate-limiting the public RPC.
     const WINDOW = 9_500n;
     const windows: { fromBlock: bigint; toBlock: bigint }[] = [];
     for (let i = 0; i < 3; i++) {
       const toBlock   = currentBlock - BigInt(i) * WINDOW;
       const fromBlock = toBlock > WINDOW ? toBlock - WINDOW : 0n;
       if (toBlock >= fromBlock) windows.push({ fromBlock, toBlock });
+      if (fromBlock === 0n) break;
     }
 
     for (const { fromBlock, toBlock } of windows) {
       try {
-        // Loan events (borrower = creator)
-        const loanCreated = await publicClient.getLogs({
+      const [loanCreated, loanAccepted, optionWritten, optionBought, staked] = await Promise.allSettled([
+        publicClient.getLogs({
           address: CONTRACT_ADDRESSES.LOAN_ENGINE,
           event: parseAbiItem('event LoanCreated(uint256 indexed loanId, address indexed borrower, uint256 principal, uint256 health)'),
           args: { borrower: address },
-          fromBlock,
-          toBlock,
-        });
-        for (const log of loanCreated) {
+          fromBlock, toBlock,
+        }),
+        publicClient.getLogs({
+          address: CONTRACT_ADDRESSES.LOAN_ENGINE,
+          event: parseAbiItem('event LoanAccepted(uint256 indexed loanId, address indexed lender)'),
+          args: { lender: address },
+          fromBlock, toBlock,
+        }),
+        publicClient.getLogs({
+          address: CONTRACT_ADDRESSES.CALL_VAULT,
+          event: parseAbiItem('event OptionWritten(uint256 indexed optionId, address indexed writer, uint256 amount, uint256 strike, uint256 premium)'),
+          args: { writer: address },
+          fromBlock, toBlock,
+        }),
+        publicClient.getLogs({
+          address: CONTRACT_ADDRESSES.CALL_VAULT,
+          event: parseAbiItem('event OptionBought(uint256 indexed optionId, address indexed buyer)'),
+          args: { buyer: address },
+          fromBlock, toBlock,
+        }),
+        publicClient.getLogs({
+          address: CONTRACT_ADDRESSES.STAKING,
+          event: parseAbiItem('event Staked(address indexed staker, uint256 amount, uint256 totalStaked)'),
+          args: { staker: address },
+          fromBlock, toBlock,
+        }),
+      ]);
+
+      // Collect block hashes we need to resolve (deduplicated)
+      const blockHashMap = new Map<string, bigint>(); // blockHash → timestamp (filled below)
+
+      const allLogs: { result: any[] } = { result: [] };
+      for (const r of [loanCreated, loanAccepted, optionWritten, optionBought, staked]) {
+        if (r.status === 'fulfilled') for (const log of r.value) allLogs.result.push(log);
+      }
+
+      // Fetch block timestamps in parallel for all unique blocks in this window
+      const uniqueHashes = [...new Set(allLogs.result.map(l => l.blockHash).filter(Boolean))];
+      await Promise.allSettled(uniqueHashes.map(async (hash) => {
+        try {
+          const blk = await publicClient.getBlock({ blockHash: hash as `0x${string}` });
+          blockHashMap.set(hash, blk.timestamp);
+        } catch { /* skip */ }
+      }));
+
+      // Process loanCreated
+      if (loanCreated.status === 'fulfilled') {
+        for (const log of loanCreated.value) {
           const key = log.transactionHash ?? `${log.blockNumber}-lc-${log.args.loanId}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          const block = await publicClient.getBlock({ blockHash: log.blockHash as `0x${string}` });
+          if (seen.has(key)) continue; seen.add(key);
+          const ts = blockHashMap.get(log.blockHash ?? '') ?? 0n;
           events.push({
             type: 'LoanCreated',
             id: log.args.loanId?.toString() ?? '?',
             txHash: log.transactionHash ?? '',
             blockNumber: log.blockNumber ?? 0n,
-            timestamp: Number(block.timestamp) * 1000,
+            timestamp: Number(ts) * 1000,
             detail: `Created loan #${log.args.loanId} — ${formatUnits(log.args.principal ?? 0n, 6)} USDC`,
           });
         }
-
-        // Loan accepted (lender)
-        const loanAccepted = await publicClient.getLogs({
-          address: CONTRACT_ADDRESSES.LOAN_ENGINE,
-          event: parseAbiItem('event LoanAccepted(uint256 indexed loanId, address indexed lender)'),
-          args: { lender: address },
-          fromBlock,
-          toBlock,
-        });
-        for (const log of loanAccepted) {
+      }
+      // Process loanAccepted
+      if (loanAccepted.status === 'fulfilled') {
+        for (const log of loanAccepted.value) {
           const key = log.transactionHash ?? `${log.blockNumber}-la-${log.args.loanId}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          const block = await publicClient.getBlock({ blockHash: log.blockHash as `0x${string}` });
+          if (seen.has(key)) continue; seen.add(key);
+          const ts = blockHashMap.get(log.blockHash ?? '') ?? 0n;
           events.push({
             type: 'LoanAccepted',
             id: log.args.loanId?.toString() ?? '?',
             txHash: log.transactionHash ?? '',
             blockNumber: log.blockNumber ?? 0n,
-            timestamp: Number(block.timestamp) * 1000,
+            timestamp: Number(ts) * 1000,
             detail: `Funded loan #${log.args.loanId}`,
           });
         }
-
-        // Options written
-        const optionWritten = await publicClient.getLogs({
-          address: CONTRACT_ADDRESSES.CALL_VAULT,
-          event: parseAbiItem('event OptionWritten(uint256 indexed optionId, address indexed writer, uint256 amount, uint256 strike, uint256 premium)'),
-          args: { writer: address },
-          fromBlock,
-          toBlock,
-        });
-        for (const log of optionWritten) {
+      }
+      // Process optionWritten
+      if (optionWritten.status === 'fulfilled') {
+        for (const log of optionWritten.value) {
           const key = log.transactionHash ?? `${log.blockNumber}-ow-${log.args.optionId}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          const block = await publicClient.getBlock({ blockHash: log.blockHash as `0x${string}` });
+          if (seen.has(key)) continue; seen.add(key);
+          const ts = blockHashMap.get(log.blockHash ?? '') ?? 0n;
           events.push({
             type: 'OptionWritten',
             id: log.args.optionId?.toString() ?? '?',
             txHash: log.transactionHash ?? '',
             blockNumber: log.blockNumber ?? 0n,
-            timestamp: Number(block.timestamp) * 1000,
+            timestamp: Number(ts) * 1000,
             detail: `Wrote call option #${log.args.optionId} — strike ${formatUnits(log.args.strike ?? 0n, 6)} USDC`,
           });
         }
-
-        // Options bought
-        const optionBought = await publicClient.getLogs({
-          address: CONTRACT_ADDRESSES.CALL_VAULT,
-          event: parseAbiItem('event OptionBought(uint256 indexed optionId, address indexed buyer)'),
-          args: { buyer: address },
-          fromBlock,
-          toBlock,
-        });
-        for (const log of optionBought) {
+      }
+      // Process optionBought
+      if (optionBought.status === 'fulfilled') {
+        for (const log of optionBought.value) {
           const key = log.transactionHash ?? `${log.blockNumber}-ob-${log.args.optionId}`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          const block = await publicClient.getBlock({ blockHash: log.blockHash as `0x${string}` });
+          if (seen.has(key)) continue; seen.add(key);
+          const ts = blockHashMap.get(log.blockHash ?? '') ?? 0n;
           events.push({
             type: 'OptionBought',
             id: log.args.optionId?.toString() ?? '?',
             txHash: log.transactionHash ?? '',
             blockNumber: log.blockNumber ?? 0n,
-            timestamp: Number(block.timestamp) * 1000,
+            timestamp: Number(ts) * 1000,
             detail: `Bought option #${log.args.optionId}`,
           });
         }
-
-        // Staking
-        const staked = await publicClient.getLogs({
-          address: CONTRACT_ADDRESSES.STAKING,
-          event: parseAbiItem('event Staked(address indexed staker, uint256 amount, uint256 totalStaked)'),
-          args: { staker: address },
-          fromBlock,
-          toBlock,
-        });
-        for (const log of staked) {
+      }
+      // Process staked
+      if (staked.status === 'fulfilled') {
+        for (const log of staked.value) {
           const key = log.transactionHash ?? `${log.blockNumber}-st`;
-          if (seen.has(key)) continue;
-          seen.add(key);
-          const block = await publicClient.getBlock({ blockHash: log.blockHash as `0x${string}` });
+          if (seen.has(key)) continue; seen.add(key);
+          const ts = blockHashMap.get(log.blockHash ?? '') ?? 0n;
           events.push({
             type: 'Staked',
             id: '—',
             txHash: log.transactionHash ?? '',
             blockNumber: log.blockNumber ?? 0n,
-            timestamp: Number(block.timestamp) * 1000,
+            timestamp: Number(ts) * 1000,
             detail: `Staked ${formatUnits(log.args.amount ?? 0n, 18)} STREET`,
           });
         }
-      } catch (windowErr) {
-        // One window failing (e.g. RPC gap) shouldn't abort the whole fetch
-        console.warn('Profile: window fetch error', windowErr);
       }
+      } catch { /* skip failed window */ }
     }
 
     events.sort((a, b) => {
@@ -449,6 +462,101 @@ export default function Profile() {
   const streetBalance = reads?.[0]?.result as bigint | undefined;
   const usdcBalance   = reads?.[1]?.result as bigint | undefined;
   const stakingPos    = reads?.[2]?.result as readonly [bigint, bigint, bigint, bigint, boolean] | undefined;
+  const loanCount     = reads?.[3]?.result as bigint | undefined;
+  const optionCount   = reads?.[4]?.result as bigint | undefined;
+
+  // ── Contract reads for deal structs (counts from loans(i) / options(j)) ──────
+  // Memoized so wagmi sees a stable reference and doesn't re-issue on every render
+  const dealCalls = useMemo(() => [
+    ...Array.from({ length: Number(loanCount ?? 0) }, (_, i) => ({
+      address: CONTRACT_ADDRESSES.LOAN_ENGINE as `0x${string}`,
+      abi: clawStreetLoanABI,
+      functionName: 'loans' as const,
+      args: [BigInt(i)] as [bigint],
+    })),
+    ...Array.from({ length: Number(optionCount ?? 0) }, (_, i) => ({
+      address: CONTRACT_ADDRESSES.CALL_VAULT as `0x${string}`,
+      abi: clawStreetCallVaultABI,
+      functionName: 'options' as const,
+      args: [BigInt(i)] as [bigint],
+    })),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [Number(loanCount ?? 0), Number(optionCount ?? 0)]);
+
+  const { data: dealReads } = useReadContracts({
+    contracts: dealCalls,
+    query: { enabled: loanCount !== undefined && optionCount !== undefined, refetchInterval: 30_000 },
+  });
+
+  // Derive counts from contract reads — wagmi returns tuple results as plain arrays
+  // loan: [0]=borrower, [1]=lender, [10]=repaid
+  // option: [0]=writer, [1]=buyer, [7]=exercised
+  const nLoan      = Number(loanCount ?? 0);
+  const loanData   = dealReads?.slice(0, nLoan).map(r => r.result as any[] | undefined) ?? [];
+  const optionData = dealReads?.slice(nLoan).map(r => r.result as any[] | undefined) ?? [];
+  const addr       = address.toLowerCase();
+  const ZERO       = '0x0000000000000000000000000000000000000000';
+
+  const loansCreated   = loanData.filter(l => l && (l[0] as string)?.toLowerCase() === addr).length;
+  const loansFunded    = loanData.filter(l => l && (l[1] as string)?.toLowerCase() === addr && l[1] !== ZERO).length;
+  const optionsWritten = optionData.filter(o => o && (o[0] as string)?.toLowerCase() === addr).length;
+  const optionsBought  = optionData.filter(o => o && (o[1] as string)?.toLowerCase() === addr && o[1] !== ZERO).length;
+  const totalDeals     = loansCreated + loansFunded + optionsWritten + optionsBought;
+  const statsLoading   = loanCount === undefined || optionCount === undefined ||
+    (dealCalls.length > 0 && dealReads === undefined);
+
+  // ── Build timeline events from contract reads (no getLogs needed) ─────────────
+  // loan: [0]=borrower, [1]=lender, [3]=nftId, [4]=principal, [5]=interest, [7]=startTime, [9]=active, [10]=repaid
+  // option: [0]=writer, [1]=buyer, [3]=amount, [4]=strike, [5]=expiry, [6]=premium, [7]=exercised
+  const contractEvents: DealEvent[] = useMemo(() => {
+    const evts: DealEvent[] = [];
+    loanData.forEach((l, i) => {
+      if (!l) return;
+      const startTime = Number(l[7] as bigint) * 1000;
+      if ((l[0] as string)?.toLowerCase() === addr) {
+        evts.push({
+          type: 'LoanCreated', id: String(i), txHash: '',
+          blockNumber: l[7] as bigint,
+          timestamp: startTime,
+          detail: `Created loan #${i} — ${formatUnits(l[4] as bigint, 6)} USDC${l[10] ? ' · Repaid' : l[9] ? ' · Active' : ''}`,
+        });
+      }
+      if ((l[1] as string)?.toLowerCase() === addr && l[1] !== ZERO) {
+        evts.push({
+          type: 'LoanAccepted', id: String(i), txHash: '',
+          blockNumber: l[7] as bigint,
+          timestamp: startTime,
+          detail: `Funded loan #${i} — ${formatUnits(l[4] as bigint, 6)} USDC principal`,
+        });
+      }
+    });
+    optionData.forEach((o, i) => {
+      if (!o) return;
+      const expiry = Number(o[5] as bigint) * 1000;
+      if ((o[0] as string)?.toLowerCase() === addr) {
+        evts.push({
+          type: 'OptionWritten', id: String(i), txHash: '',
+          blockNumber: o[5] as bigint,
+          timestamp: expiry,
+          detail: `Wrote call option #${i} — strike ${formatUnits(o[4] as bigint, 6)} USDC, premium ${formatUnits(o[6] as bigint, 6)} USDC${o[7] ? ' · Exercised' : ''}`,
+        });
+      }
+      if ((o[1] as string)?.toLowerCase() === addr && o[1] !== ZERO) {
+        evts.push({
+          type: 'OptionBought', id: String(i), txHash: '',
+          blockNumber: o[5] as bigint,
+          timestamp: expiry,
+          detail: `Bought option #${i} — strike ${formatUnits(o[4] as bigint, 6)} USDC${o[7] ? ' · Exercised ✓' : ''}`,
+        });
+      }
+    });
+    evts.sort((a, b) => {
+      const diff = b.blockNumber - a.blockNumber;
+      return diff > 0n ? 1 : diff < 0n ? -1 : 0;
+    });
+    return evts;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dealReads, addr]);
 
   // ETH balance
   useEffect(() => {
@@ -470,7 +578,7 @@ export default function Profile() {
       }
     });
     return () => { stale = true; };
-  }, [address]); // intentionally omit publicClient — it's stable once the chain is connected
+  }, [address, publicClient]); // publicClient can be undefined on first render — must re-run when it resolves
 
   if (!address || address.length < 10) {
     return (
@@ -481,12 +589,6 @@ export default function Profile() {
       </div>
     );
   }
-
-  const totalDeals = events.length;
-  const loansCreated = events.filter(e => e.type === 'LoanCreated').length;
-  const loansFunded  = events.filter(e => e.type === 'LoanAccepted').length;
-  const optionsWritten = events.filter(e => e.type === 'OptionWritten').length;
-  const optionsBought  = events.filter(e => e.type === 'OptionBought').length;
 
   return (
     <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -558,12 +660,12 @@ export default function Profile() {
         </div>
       )}
 
-      {/* Activity Stats */}
+{/* Activity Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-        <StatCard label="Total Events" value={totalDeals.toString()} />
-        <StatCard label="Loans Created" value={loansCreated.toString()} />
-        <StatCard label="Loans Funded" value={loansFunded.toString()} />
-        <StatCard label="Options" value={(optionsWritten + optionsBought).toString()} sub={`${optionsWritten} written, ${optionsBought} bought`} />
+        <StatCard label="Total Deals" value={statsLoading ? '…' : totalDeals.toString()} />
+        <StatCard label="Loans Created" value={statsLoading ? '…' : loansCreated.toString()} />
+        <StatCard label="Loans Funded" value={statsLoading ? '…' : loansFunded.toString()} />
+        <StatCard label="Options" value={statsLoading ? '…' : (optionsWritten + optionsBought).toString()} sub={statsLoading ? undefined : `${optionsWritten} written, ${optionsBought} bought`} />
       </div>
 
       {/* Activity Timeline */}
@@ -573,21 +675,18 @@ export default function Profile() {
             <Activity size={18} className="text-base-blue" />
             On-Chain Activity
           </h2>
-          {loadingEvents && <span className="text-xs text-gray-500 animate-pulse">Loading from chain...</span>}
+          {statsLoading && <span className="text-xs text-gray-500 animate-pulse">Loading from chain...</span>}
         </div>
 
-        {!loadingEvents && events.length === 0 && (
+        {!statsLoading && contractEvents.length === 0 && (
           <div className="text-center py-12 text-gray-500">
             <Clock className="mx-auto mb-3" size={32} />
             <p className="text-sm">No on-chain activity found for this address.</p>
-            {isAgent && (
-              <p className="text-xs mt-2">Run <code className="font-mono bg-cyber-bg px-1.5 py-0.5 rounded">npm run seed</code> to generate activity.</p>
-            )}
           </div>
         )}
 
         <div className="space-y-3">
-          {events.map((event, i) => (
+          {contractEvents.map((event, i) => (
             <motion.div
               key={i}
               initial={{ opacity: 0, x: -10 }}
@@ -620,17 +719,17 @@ export default function Profile() {
         </div>
 
         {/* Active Deals links */}
-        {!loadingEvents && events.length > 0 && (
+        {!statsLoading && contractEvents.length > 0 && (
           <div className="mt-6 pt-4 border-t border-cyber-border">
             <p className="text-xs text-gray-500 mb-3">Quick links to active deals:</p>
             <div className="flex flex-wrap gap-2">
-              {events.filter(e => e.type === 'LoanCreated').map(e => (
-                <Link key={e.txHash} to={`/loan/${e.id}`} className="text-xs px-3 py-1.5 bg-cyber-bg border border-cyber-border rounded-lg text-gray-300 hover:text-white hover:border-base-blue/50 transition-colors">
+              {contractEvents.filter(e => e.type === 'LoanCreated').map(e => (
+                <Link key={e.id} to={`/loan/${e.id}`} className="text-xs px-3 py-1.5 bg-cyber-bg border border-cyber-border rounded-lg text-gray-300 hover:text-white hover:border-base-blue/50 transition-colors">
                   Loan #{e.id}
                 </Link>
               ))}
-              {events.filter(e => e.type === 'OptionWritten').map(e => (
-                <Link key={e.txHash} to={`/option/${e.id}`} className="text-xs px-3 py-1.5 bg-cyber-bg border border-cyber-border rounded-lg text-gray-300 hover:text-white hover:border-purple-500/50 transition-colors">
+              {contractEvents.filter(e => e.type === 'OptionWritten').map(e => (
+                <Link key={e.id} to={`/option/${e.id}`} className="text-xs px-3 py-1.5 bg-cyber-bg border border-cyber-border rounded-lg text-gray-300 hover:text-white hover:border-purple-500/50 transition-colors">
                   Option #{e.id}
                 </Link>
               ))}

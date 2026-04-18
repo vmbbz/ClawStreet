@@ -13,11 +13,43 @@ import {
 } from './scripts/lib/negotiation-store.js';
 import { notifyAgent } from './scripts/lib/contact-notifier.js';
 import { getAddressStats } from './scripts/lib/stats-calculator.js';
+import {
+  relayDeal, autoExecuteAcceptedOffer, isInternalAgent, buildRelayIntentMessage,
+} from './scripts/lib/deal-relay.js';
 
-// ─── Faucet rate-limit (in-memory) ────────────────────────────────────────────
+// ─── Rate limits (in-memory) ──────────────────────────────────────────────────
 // Maps lowercase address → timestamp of last claim
-const faucetClaims = new Map<string, number>();
+const faucetClaims    = new Map<string, number>();
 const FAUCET_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
+
+// Maps lowercase address → { count, windowStart }
+const announceCounts  = new Map<string, { count: number; windowStart: number }>();
+const negotiateCounts = new Map<string, { count: number; windowStart: number }>();
+const relayCounts     = new Map<string, { count: number; windowStart: number }>();
+const ANNOUNCE_LIMIT  = 5;   // max 5 announces per address per 10 minutes
+const NEGOTIATE_LIMIT = 10;  // max 10 offers per address per 10 minutes
+const RELAY_LIMIT     = 3;   // max 3 relay txs per address per hour
+const RATE_WINDOW_MS  = 10 * 60 * 1000; // 10-minute sliding window
+const RELAY_WINDOW_MS = 60 * 60 * 1000; // 1-hour window for relay
+
+function checkRateLimit(
+  map: Map<string, { count: number; windowStart: number }>,
+  key: string,
+  limit: number,
+): { allowed: boolean; retryAfterSeconds: number } {
+  const now  = Date.now();
+  const rec  = map.get(key);
+  if (!rec || now - rec.windowStart > RATE_WINDOW_MS) {
+    map.set(key, { count: 1, windowStart: now });
+    return { allowed: true, retryAfterSeconds: 0 };
+  }
+  if (rec.count >= limit) {
+    const retryAfterSeconds = Math.ceil((RATE_WINDOW_MS - (now - rec.windowStart)) / 1000);
+    return { allowed: false, retryAfterSeconds };
+  }
+  rec.count++;
+  return { allowed: true, retryAfterSeconds: 0 };
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -323,6 +355,53 @@ async function startServer() {
     }
   });
 
+  // ─── Gas Relay API ────────────────────────────────────────────────────────
+
+  // POST /api/agents/deals/relay — broadcast a deal tx on behalf of an external agent
+  // The agent signs an EIP-191 intent; the server relayer wallet pays gas.
+  app.post('/api/agents/deals/relay', async (req, res) => {
+    const { from, type, params, timestamp, signature } = req.body ?? {};
+    if (!from || !type || !params || !timestamp || !signature) {
+      return res.status(400).json({ success: false, error: 'Missing required fields: from, type, params, timestamp, signature' });
+    }
+    const validTypes = ['buy_option', 'accept_loan', 'covered_call', 'loan_offer'];
+    if (!validTypes.includes(type)) {
+      return res.status(400).json({ success: false, error: `type must be one of: ${validTypes.join(', ')}` });
+    }
+    if (!/^0x[0-9a-fA-F]{40}$/.test(from)) {
+      return res.status(400).json({ success: false, error: 'Invalid from address' });
+    }
+    // Rate limit: 3 relay requests per address per hour
+    const rl = checkRateLimit(relayCounts, (from as string).toLowerCase(), RELAY_LIMIT);
+    if (!rl.allowed) {
+      return res.status(429).json({ success: false, error: `Rate limited — try again in ${rl.retryAfterSeconds}s` });
+    }
+
+    try {
+      const result = await relayDeal({ from, type, params, timestamp: Number(timestamp), signature });
+      if (!result.success) return res.status(400).json(result);
+      console.log(`[relay] ${type} for ${from} → tx ${result.txHash} deal #${result.dealId}`);
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ success: false, error: String(e) });
+    }
+  });
+
+  // GET /api/agents/deals/relay/intent — helper: returns the canonical message to sign
+  app.get('/api/agents/deals/relay/intent', (req, res) => {
+    const { type, params, timestamp } = req.query as Record<string, string>;
+    if (!type || !params || !timestamp) {
+      return res.status(400).json({ error: 'Query params required: type, params (JSON), timestamp' });
+    }
+    try {
+      const parsed = JSON.parse(params);
+      const message = buildRelayIntentMessage({ type, params: parsed, timestamp: Number(timestamp) });
+      res.json({ message });
+    } catch {
+      res.status(400).json({ error: 'params must be valid JSON' });
+    }
+  });
+
   // ─── Bootstrap internal dev agents in registry ──────────────────────────
   // These are always present — no signature needed, never expire.
 
@@ -369,6 +448,10 @@ async function startServer() {
     if (!address || !name || !role || !participantType || !timestamp || !signature) {
       return res.status(400).json({ success: false, error: 'Missing required fields: address, name, role, participantType, timestamp, signature' });
     }
+    const rl = checkRateLimit(announceCounts, (address as string).toLowerCase(), ANNOUNCE_LIMIT);
+    if (!rl.allowed) {
+      return res.status(429).json({ success: false, error: `Rate limited — try again in ${rl.retryAfterSeconds}s` });
+    }
     const result = await verifyAndRegister({ address, name, contact: contact ?? '', role, participantType, timestamp, signature });
     if (result.success) return res.json({ success: true, entry: getAgent(address) });
     res.status(400).json(result);
@@ -413,6 +496,10 @@ async function startServer() {
     if (!from || !to || !dealType || dealId === undefined || !proposedTerms || !timestamp || !signature) {
       return res.status(400).json({ success: false, error: 'Missing required fields' });
     }
+    const rl = checkRateLimit(negotiateCounts, (from as string).toLowerCase(), NEGOTIATE_LIMIT);
+    if (!rl.allowed) {
+      return res.status(429).json({ success: false, error: `Rate limited — try again in ${rl.retryAfterSeconds}s` });
+    }
     const result = await submitOffer({ from, to, dealType, dealId: Number(dealId), proposedTerms, timestamp, signature });
     if (!result.success) return res.status(400).json(result);
 
@@ -446,10 +533,53 @@ async function startServer() {
     const result = await respondToOffer({ respondingAddress, offerId, response, counterTerms, timestamp, signature });
     if (!result.success) return res.status(400).json(result);
 
-    // Notify original proposer if they have a contact URL
+    // Find the original offer for notifications + auto-execute
     const offers = getOffersForAddress(respondingAddress);
     const originalOffer = offers.find(o => o.id === offerId);
-    if (originalOffer) {
+
+    // ── Layer 3: Auto-execute on acceptance by an internal agent ──────────────
+    let autoExecResult: { newDealId?: number; txHash?: string } | null = null;
+    if (response === 'accept' && originalOffer && isInternalAgent(respondingAddress)) {
+      autoExecuteAcceptedOffer({
+        acceptingAgentAddress: respondingAddress,
+        dealType: originalOffer.dealType,
+        agreedTerms: originalOffer.proposedTerms as any,
+      }).then(execResult => {
+        if (execResult.success && originalOffer) {
+          autoExecResult = execResult;
+          // Notify proposer with the new deal ID so they can fill it
+          const proposerEntry = getAgent(originalOffer.from);
+          if (proposerEntry?.contact) {
+            notifyAgent(proposerEntry.contact, {
+              type: 'offer_accepted',
+              offerId,
+              dealType: originalOffer.dealType,
+              dealId: execResult.newDealId ?? originalOffer.dealId,
+              from: respondingAddress,
+              proposedTerms: { ...originalOffer.proposedTerms, newDealId: execResult.newDealId },
+              timestamp: Math.floor(Date.now() / 1000),
+            });
+          }
+          console.log(`[auto-exec] ${originalOffer.dealType} #${execResult.newDealId} created after offer ${offerId} accepted`);
+        } else {
+          console.warn(`[auto-exec] Failed for offer ${offerId}:`, execResult.error);
+          // Fall through — still notify proposer of acceptance even without auto-exec
+          const proposerEntry = getAgent(originalOffer!.from);
+          if (proposerEntry?.contact) {
+            notifyAgent(proposerEntry.contact, {
+              type: 'offer_accepted',
+              offerId,
+              dealType: originalOffer!.dealType,
+              dealId: originalOffer!.dealId,
+              from: respondingAddress,
+              proposedTerms: originalOffer!.proposedTerms,
+              timestamp: Math.floor(Date.now() / 1000),
+            });
+          }
+        }
+      }).catch(e => console.error('[auto-exec] Error:', e));
+    } else if (originalOffer) {
+      // Non-accept or external agent responding — standard webhook notification
       const proposerEntry = getAgent(originalOffer.from);
       if (proposerEntry?.contact) {
         const notifyType = response === 'accept' ? 'offer_accepted'

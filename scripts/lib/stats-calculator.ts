@@ -1,48 +1,53 @@
 /**
- * stats-calculator.ts — On-chain performance stats aggregation per address
+ * stats-calculator.ts — On-chain performance stats per address
  *
- * Fetches recent events from the protocol contracts using a bounded getLogs
- * window (current block − 9500), aggregates by address, and computes estimated
- * PnL. Results are cached in-memory for 60s to avoid hammering the RPC.
+ * Uses direct contract reads (readContract on loans(id) / options(id)) instead of
+ * getLogs to avoid block-range limits and public RPC rate limits. Works for any
+ * history length on a testnet with a small number of total deals.
  */
 
-import { createPublicClient, http, parseAbiItem, formatUnits } from 'viem';
+import { createPublicClient, http, parseAbi, formatUnits } from 'viem';
 import { baseSepolia } from 'viem/chains';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface AgentStats {
   address: string;
-  // Loan activity
-  loansCreated: number;        // LoanCreated where borrower = address
-  loansFunded: number;         // LoanAccepted where lender = address
-  loansRepaid: number;         // LoanRepaid where borrower = address (approx)
-  // Options activity
-  optionsWritten: number;      // OptionWritten where writer = address
-  optionsSold: number;         // OptionBought where writer (from written log) = address
-  optionsBought: number;       // OptionBought where buyer = address
-  optionsExercised: number;    // OptionExercised where buyer = address
-  // Volume
-  totalUsdcVolume: string;     // formatted with 2 decimals
-  estimatedPnlUsdc: string;    // rough estimate, may be negative
-  // Summary
+  loansCreated: number;
+  loansFunded: number;
+  loansRepaid: number;
+  optionsWritten: number;
+  optionsSold: number;
+  optionsBought: number;
+  optionsExercised: number;
+  totalUsdcVolume: string;
+  estimatedPnlUsdc: string;
   totalDeals: number;
-  dataWindowBlocks: number;    // how many blocks of history were scanned
+  dataWindowBlocks: number; // -1 = contract reads (no block window)
 }
 
 // ─── Contract addresses ────────────────────────────────────────────────────────
-// Imported from config so we have one source of truth.
-// We keep these here to avoid frontend imports in server-side code.
 
-const LOAN_ENGINE  = '0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c' as const;
-const CALL_VAULT   = '0x69730728a0B19b844bc18888d2317987Bc528baE' as const;
-const RPC_URL      = process.env.BASE_SEPOLIA_RPC ?? 'https://sepolia.base.org';
-const BLOCK_WINDOW = 9500n;
+const LOAN_ENGINE = '0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c' as const;
+const CALL_VAULT  = '0x69730728a0B19b844bc18888d2317987Bc528baE' as const;
+const RPC_URL     = process.env.BASE_SEPOLIA_RPC ?? 'https://sepolia.base.org';
+
+// ─── Minimal ABIs (server-side, can't import from src/) ───────────────────────
+
+const LOAN_ABI = parseAbi([
+  'function loanCounter() external view returns (uint256)',
+  'function loans(uint256) external view returns (address,address,address,uint256,uint256,uint256,uint256,uint256,uint256,bool,bool)',
+]);
+
+const VAULT_ABI = parseAbi([
+  'function optionCounter() external view returns (uint256)',
+  'function options(uint256) external view returns (address,address,address,uint256,uint256,uint256,uint256,bool,bool)',
+]);
 
 // ─── Cache ────────────────────────────────────────────────────────────────────
 
 const cache = new Map<string, { stats: AgentStats; expiresAt: number }>();
-const CACHE_TTL_MS = 60_000; // 60s
+const CACHE_TTL_MS = 60_000;
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -57,146 +62,98 @@ export async function getAddressStats(address: string): Promise<AgentStats> {
   return stats;
 }
 
-// ─── Core fetch ───────────────────────────────────────────────────────────────
+// ─── Core fetch (contract reads — no block range constraint) ──────────────────
 
 async function fetchStats(address: string): Promise<AgentStats> {
   const client = createPublicClient({ chain: baseSepolia, transport: http(RPC_URL) });
 
-  const currentBlock = await client.getBlockNumber();
-  const fromBlock = currentBlock > BLOCK_WINDOW ? currentBlock - BLOCK_WINDOW : 0n;
-
-  let loansCreated    = 0;
-  let loansFunded     = 0;
-  let loansRepaid     = 0;
-  let optionsWritten  = 0;
-  let optionsBought   = 0;
-  let optionsExercised = 0;
-
-  // Estimated USDC flows kept as bigint throughout to avoid float precision loss
-  let estimatedPnl = 0n; // in USDC micro-units (6 decimals)
-  let totalVolume  = 0n;
-
   try {
-    // ── Loans created (as borrower) ──────────────────────────────────────
-    const loanCreatedLogs = await client.getLogs({
-      address: LOAN_ENGINE,
-      event: parseAbiItem('event LoanCreated(uint256 indexed loanId, address indexed borrower, uint256 principal, uint256 health)'),
-      args: { borrower: address as `0x${string}` },
-      fromBlock,
-    });
-    loansCreated = loanCreatedLogs.length;
-    for (const log of loanCreatedLogs) {
-      const principal = log.args.principal ?? 0n;
-      totalVolume  += principal;
-      // Borrower receives principal as inflow (owes it back later)
-      estimatedPnl += principal;
-    }
+    // ── Get total counts ──────────────────────────────────────────────────────
+    const [loanCount, optionCount] = await Promise.all([
+      client.readContract({ address: LOAN_ENGINE, abi: LOAN_ABI, functionName: 'loanCounter' }),
+      client.readContract({ address: CALL_VAULT,  abi: VAULT_ABI, functionName: 'optionCounter' }),
+    ]) as [bigint, bigint];
 
-    // ── Loans funded (as lender) ─────────────────────────────────────────
-    const loanAcceptedLogs = await client.getLogs({
-      address: LOAN_ENGINE,
-      event: parseAbiItem('event LoanAccepted(uint256 indexed loanId, address indexed lender)'),
-      args: { lender: address as `0x${string}` },
-      fromBlock,
-    });
-    loansFunded = loanAcceptedLogs.length;
+    // ── Read all loans in parallel ────────────────────────────────────────────
+    const loanIds = Array.from({ length: Number(loanCount) }, (_, i) => BigInt(i));
+    const loans = await Promise.all(
+      loanIds.map(id => client.readContract({
+        address: LOAN_ENGINE, abi: LOAN_ABI, functionName: 'loans', args: [id],
+      }))
+    ) as any[][];
 
-    // ── Loans repaid (as borrower) ────────────────────────────────────────
-    // LoanRepaid event signature: LoanRepaid(uint256 loanId)
-    // We can't filter by borrower here, so we count events we know about
-    // from the LoanCreated logs. This is approximate for the bounded window.
-    const loanRepaidLogs = await client.getLogs({
-      address: LOAN_ENGINE,
-      event: parseAbiItem('event LoanRepaid(uint256 indexed loanId)'),
-      fromBlock,
-    });
-    // Count repaid loans where the loanId appears in our created loans
-    const createdLoanIds = new Set(loanCreatedLogs.map(l => l.args.loanId?.toString()));
-    for (const log of loanRepaidLogs) {
-      if (createdLoanIds.has(log.args.loanId?.toString())) {
-        loansRepaid++;
-        // Repaid = borrower paid back principal + interest → negative PnL adjustment
-        // We use a rough 10% interest estimate since we'd need another read to get exact amount
+    // loan[0]=borrower, loan[1]=lender, loan[4]=principal, loan[5]=interest,
+    // loan[9]=active, loan[10]=repaid
+    const addr = address.toLowerCase();
+    const ZERO = '0x0000000000000000000000000000000000000000';
+
+    const loansCreated = loans.filter(l => l[0]?.toLowerCase() === addr).length;
+    const loansFunded  = loans.filter(l => l[1]?.toLowerCase() === addr && l[1] !== ZERO).length;
+    const loansRepaid  = loans.filter(l => l[0]?.toLowerCase() === addr && l[10] === true).length;
+
+    // Estimate PnL: lender earns interest on funded+repaid loans
+    let estimatedPnl = 0n;
+    let totalVolume  = 0n;
+    for (const l of loans) {
+      const principal = l[4] as bigint ?? 0n;
+      const interest  = l[5] as bigint ?? 0n;
+      const repaid    = l[10] as boolean;
+      if (l[0]?.toLowerCase() === addr) {
+        totalVolume += principal;
+      }
+      if (l[1]?.toLowerCase() === addr && l[1] !== ZERO) {
+        totalVolume += principal;
+        if (repaid) estimatedPnl += interest;
       }
     }
 
-    // ── Options written ───────────────────────────────────────────────────
-    const optionWrittenLogs = await client.getLogs({
-      address: CALL_VAULT,
-      event: parseAbiItem('event OptionWritten(uint256 indexed optionId, address indexed writer, uint256 amount, uint256 strike, uint256 premium)'),
-      args: { writer: address as `0x${string}` },
-      fromBlock,
-    });
-    optionsWritten = optionWrittenLogs.length;
-    const writtenOptionIds = new Set(optionWrittenLogs.map(l => l.args.optionId?.toString()));
+    // ── Read all options in parallel ──────────────────────────────────────────
+    const optionIds = Array.from({ length: Number(optionCount) }, (_, i) => BigInt(i));
+    const options = await Promise.all(
+      optionIds.map(id => client.readContract({
+        address: CALL_VAULT, abi: VAULT_ABI, functionName: 'options', args: [id],
+      }))
+    ) as any[][];
 
-    // ── Options bought by this address ────────────────────────────────────
-    const optionBoughtAsLogs = await client.getLogs({
-      address: CALL_VAULT,
-      event: parseAbiItem('event OptionBought(uint256 indexed optionId, address indexed buyer)'),
-      args: { buyer: address as `0x${string}` },
-      fromBlock,
-    });
-    optionsBought = optionBoughtAsLogs.length;
+    // option[0]=writer, option[1]=buyer, option[6]=premium, option[7]=exercised
+    const optionsWritten   = options.filter(o => o[0]?.toLowerCase() === addr).length;
+    const optionsBought    = options.filter(o => o[1]?.toLowerCase() === addr && o[1] !== ZERO).length;
+    const optionsSold      = options.filter(o => o[0]?.toLowerCase() === addr && o[1] !== ZERO).length;
+    const optionsExercised = options.filter(o => o[1]?.toLowerCase() === addr && o[7] === true).length;
 
-    // ── Options where this address was the WRITER who collected premium ───
-    const optionBoughtFromWriterLogs = await client.getLogs({
-      address: CALL_VAULT,
-      event: parseAbiItem('event OptionBought(uint256 indexed optionId, address indexed buyer)'),
-      fromBlock,
-    });
-    let optionsSold = 0;
-    for (const log of optionBoughtFromWriterLogs) {
-      if (writtenOptionIds.has(log.args.optionId?.toString())) {
-        optionsSold++;
-        // Find the matching written log to get premium
-        const writtenLog = optionWrittenLogs.find(
-          w => w.args.optionId?.toString() === log.args.optionId?.toString()
-        );
-        if (writtenLog) {
-          const premium = writtenLog.args.premium ?? 0n;
+    for (const o of options) {
+      const premium = o[6] as bigint ?? 0n;
+      if (o[0]?.toLowerCase() === addr) {
+        // Writer wrote a call — premium is income when bought
+        if (o[1] !== ZERO) {
           estimatedPnl += premium;
           totalVolume  += premium;
         }
       }
     }
 
-    // ── Options exercised ─────────────────────────────────────────────────
-    const optionExercisedLogs = await client.getLogs({
-      address: CALL_VAULT,
-      event: parseAbiItem('event OptionExercised(uint256 indexed optionId, address indexed buyer)'),
-      args: { buyer: address as `0x${string}` },
-      fromBlock,
-    });
-    optionsExercised = optionExercisedLogs.length;
-
     const totalDeals = loansCreated + loansFunded + optionsWritten + optionsBought;
 
     return {
       address,
-      loansCreated,
-      loansFunded,
-      loansRepaid,
-      optionsWritten,
-      optionsSold,
-      optionsBought,
-      optionsExercised,
-      totalUsdcVolume:    formatUnits(totalVolume, 6),
-      estimatedPnlUsdc:   formatUnits(estimatedPnl, 6),
+      loansCreated, loansFunded, loansRepaid,
+      optionsWritten, optionsSold, optionsBought, optionsExercised,
+      totalUsdcVolume:  formatUnits(totalVolume, 6),
+      estimatedPnlUsdc: formatUnits(estimatedPnl, 6),
       totalDeals,
-      dataWindowBlocks:   Number(BLOCK_WINDOW),
+      dataWindowBlocks: -1, // contract reads — no block window constraint
     };
   } catch (err) {
-    console.error(`[stats] Failed to fetch stats for ${address}:`, err);
-    return emptyStats(address, Number(BLOCK_WINDOW));
+    console.error(`[stats] readContract failed for ${address}:`, err);
+    return emptyStats(address);
   }
 }
 
-function emptyStats(address: string, windowBlocks: number): AgentStats {
+function emptyStats(address: string): AgentStats {
   return {
     address, loansCreated: 0, loansFunded: 0, loansRepaid: 0,
     optionsWritten: 0, optionsSold: 0, optionsBought: 0, optionsExercised: 0,
     totalUsdcVolume: '0.00', estimatedPnlUsdc: '0.00',
-    totalDeals: 0, dataWindowBlocks: windowBlocks,
+    totalDeals: 0, dataWindowBlocks: -1,
   };
 }
