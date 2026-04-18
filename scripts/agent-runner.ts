@@ -70,8 +70,7 @@ const ERC20_ABI = parseAbi([
 const BUNDLE_VAULT_ABI = parseAbi([
   'function depositBundle(address[] calldata erc20Tokens, uint256[] calldata erc20Amounts, address[] calldata erc721Contracts, uint256[] calldata erc721Ids, string calldata metadataURI) external returns (uint256)',
   'function approve(address to, uint256 tokenId) external',
-  'function balanceOf(address owner) external view returns (uint256)',
-  'function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256)',
+  'event BundleDeposited(uint256 indexed tokenId, address indexed owner)',
 ]);
 
 const LOAN_ABI = parseAbi([
@@ -239,7 +238,15 @@ async function depositAndGetBundleId(
     `${agentName}: approve tWETH → BundleVault`, agentName, txs,
   );
 
-  // Deposit into BundleVault
+  // Simulate first to capture the returned tokenId
+  const { result: bundleId } = await publicClient.simulateContract({
+    address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI,
+    functionName: 'depositBundle',
+    args: [[TEST_WETH], [wethAmount], [], [], ''],
+    account: owner,
+  }) as { result: bigint };
+
+  // Execute the actual deposit
   const depositHash = await wallet.writeContract({
     address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI,
     functionName: 'depositBundle',
@@ -247,16 +254,6 @@ async function depositAndGetBundleId(
   }) as Hash;
   await waitAndLog(publicClient, depositHash, `${agentName}: depositBundle (${formatUnits(wethAmount, 18)} tWETH)`, agentName, txs);
 
-  // Resolve new bundle ID
-  const bal = await publicClient.readContract({
-    address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI, functionName: 'balanceOf', args: [owner],
-  }) as bigint;
-  if (bal === 0n) return null;
-
-  const bundleId = await publicClient.readContract({
-    address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI,
-    functionName: 'tokenOfOwnerByIndex', args: [owner, bal - 1n],
-  }) as bigint;
   return bundleId;
 }
 

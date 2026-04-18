@@ -445,7 +445,7 @@ contract ClawTokenTest is Test {
     /// @notice Token metadata must match the constructor arguments.
     function test_nameAndSymbol() public view {
         assertEq(token.name(), "ClawStreet");
-        assertEq(token.symbol(), "CLAW");
+        assertEq(token.symbol(), "STREET");
         assertEq(token.decimals(), 18);
     }
 

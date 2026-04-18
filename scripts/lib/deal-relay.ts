@@ -46,8 +46,7 @@ const VAULT_ABI = parseAbi([
 const BUNDLE_VAULT_ABI = parseAbi([
   'function depositBundle(address[] calldata erc20Tokens, uint256[] calldata erc20Amounts, address[] calldata erc721Contracts, uint256[] calldata erc721Ids, string calldata metadataURI) external returns (uint256)',
   'function approve(address to, uint256 tokenId) external',
-  'function balanceOf(address owner) external view returns (uint256)',
-  'function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256)',
+  'event BundleDeposited(uint256 indexed tokenId, address indexed owner)',
 ]);
 
 const ERC20_ABI = parseAbi([
@@ -183,24 +182,18 @@ export async function autoExecuteAcceptedOffer(params: {
       // Step 1: Approve tWETH to BundleVault
       await ensureERC20Allowance(pub, wal, TEST_WETH, account.address, BUNDLE_VAULT, wethAmount);
 
-      // Step 2: Deposit into BundleVault → mint Bundle NFT
+      // Step 2: Simulate to capture returned tokenId, then execute deposit
+      const { result: bundleId } = await pub.simulateContract({
+        address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI, functionName: 'depositBundle',
+        args: [[TEST_WETH], [wethAmount], [], [], ''],
+        account: account.address,
+      }) as { result: bigint };
+
       const depositHash = await wal.writeContract({
         address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI, functionName: 'depositBundle',
         args: [[TEST_WETH], [wethAmount], [], [], ''],
       });
       await pub.waitForTransactionReceipt({ hash: depositHash, timeout: 60_000 });
-
-      // Step 3: Resolve the new bundle NFT ID
-      const bal = await pub.readContract({
-        address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI, functionName: 'balanceOf',
-        args: [account.address],
-      }) as bigint;
-      if (bal === 0n) return { success: false, error: 'BundleVault deposit succeeded but balanceOf returned 0' };
-
-      const bundleId = await pub.readContract({
-        address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI, functionName: 'tokenOfOwnerByIndex',
-        args: [account.address, bal - 1n],
-      }) as bigint;
 
       // Step 4: Approve Bundle NFT to LoanEngine
       const approveHash = await wal.writeContract({

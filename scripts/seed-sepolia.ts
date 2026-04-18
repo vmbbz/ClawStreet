@@ -273,23 +273,20 @@ async function main() {
         });
         await waitAndLog(publicClient, h, `${label}: approve 0.5 tWETH → BundleVault`);
         results.push({ label: `${label}: approve tWETH`, hash: h });
-        // Deposit
+        // Simulate to capture returned tokenId, then execute deposit
+        const { result: bundleId } = await publicClient.simulateContract({
+          address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI,
+          functionName: 'depositBundle',
+          args: [[TEST_WETH], [wethAmount], [], [], ''],
+          account: owner,
+        }) as { result: bigint };
         h = await wallet.writeContract({
           address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI,
           functionName: 'depositBundle',
           args: [[TEST_WETH], [wethAmount], [], [], ''],
         });
-        await waitAndLog(publicClient, h, `${label}: depositBundle (0.5 tWETH)`);
+        await waitAndLog(publicClient, h, `${label}: depositBundle (0.5 tWETH) → Bundle NFT #${bundleId}`);
         results.push({ label: `${label}: depositBundle`, hash: h });
-        // Resolve bundle ID
-        const bal = await publicClient.readContract({
-          address: BUNDLE_VAULT, abi: parseAbi(['function balanceOf(address owner) external view returns (uint256)']),
-          functionName: 'balanceOf', args: [owner],
-        }) as bigint;
-        const bundleId = await publicClient.readContract({
-          address: BUNDLE_VAULT, abi: parseAbi(['function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256)']),
-          functionName: 'tokenOfOwnerByIndex', args: [owner, bal - 1n],
-        }) as bigint;
         return bundleId;
       }
 
@@ -416,30 +413,21 @@ async function main() {
       await waitAndLog(publicClient, h, 'Delta: approve 0.5 tWETH → BundleVault');
       results.push({ label: 'Delta: approve tWETH', hash: h });
 
-      // Deposit bundle (tWETH only)
+      // Simulate depositBundle to get returned tokenId, then execute
+      const wethAmt = parseUnits('0.5', 18);
+      const { result: bundleId } = await publicClient.simulateContract({
+        address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI,
+        functionName: 'depositBundle',
+        args: [[TEST_WETH], [wethAmt], [], [], ''],
+        account: delta.address,
+      }) as { result: bigint };
       h = await wallets.delta.writeContract({
         address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI,
         functionName: 'depositBundle',
-        args: [
-          [TEST_WETH],
-          [parseUnits('0.5', 18)],
-          [],
-          [],
-          '',
-        ],
+        args: [[TEST_WETH], [wethAmt], [], [], ''],
       });
-      await waitAndLog(publicClient, h, 'Delta: depositBundle (0.5 tWETH) ✨ BUNDLE NFT CREATED');
+      await waitAndLog(publicClient, h, `Delta: depositBundle (0.5 tWETH) → Bundle NFT #${bundleId}`);
       results.push({ label: 'Delta: depositBundle', hash: h });
-
-      // Resolve the bundle ID we just minted
-      const bundleBal = await publicClient.readContract({
-        address: BUNDLE_VAULT, abi: parseAbi(['function balanceOf(address owner) external view returns (uint256)']),
-        functionName: 'balanceOf', args: [delta.address],
-      }) as bigint;
-      const bundleId = await publicClient.readContract({
-        address: BUNDLE_VAULT, abi: parseAbi(['function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256)']),
-        functionName: 'tokenOfOwnerByIndex', args: [delta.address, bundleBal - 1n],
-      }) as bigint;
 
       console.log(`\n[2/2] Delta → createLoanOffer using Bundle NFT #${bundleId} as collateral`);
       h = await wallets.delta.writeContract({
