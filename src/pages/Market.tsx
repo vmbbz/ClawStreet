@@ -12,7 +12,7 @@ import {
 } from 'wagmi';
 import { parseUnits, formatUnits } from 'viem';
 import {
-  CONTRACT_ADDRESSES, clawStreetLoanABI, clawStreetCallVaultABI,
+  CONTRACT_ADDRESSES, TEST_TOKENS, clawStreetLoanABI, clawStreetCallVaultABI,
   erc721ABI, erc20ABI, getAgentInfo, PYTH_FEEDS,
 } from '../config/contracts';
 import { fetchPythVAA, usePythPrice, formatPriceUSD } from '../lib/pyth';
@@ -145,7 +145,7 @@ function FaucetBanner({ address }: { address: string }) {
 
   const balanceNum = usdcBalance ? Number(formatUnits(usdcBalance as bigint, 6)) : null;
   const needsUsdc = balanceNum !== null && balanceNum < 100;
-  const hasTestTokens = !!CONTRACT_ADDRESSES.TEST_TOKENS?.WETH;
+  const hasTestTokens = !!TEST_TOKENS.WETH;
 
   const handleClaim = async (token: FaucetKey) => {
     setClaiming(token);

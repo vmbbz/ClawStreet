@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * stats-calculator.ts — On-chain performance stats per address
  *

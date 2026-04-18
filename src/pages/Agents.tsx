@@ -345,8 +345,8 @@ export default function Agents() {
           entries.map(e => fetch(`/api/agents/${e.address}/stats`).then(r => r.json()))
         );
         const map = new Map<string, AgentStats>();
-        const zeroStats = (address: string): AgentStats => ({
-          address, loansCreated: 0, loansFunded: 0, loansRepaid: 0,
+        const zeroStats = (): AgentStats => ({
+          loansCreated: 0, loansFunded: 0, loansRepaid: 0,
           optionsWritten: 0, optionsSold: 0, optionsBought: 0, optionsExercised: 0,
           totalUsdcVolume: '0', estimatedPnlUsdc: '0', totalDeals: 0, dataWindowBlocks: -1,
         });
@@ -355,7 +355,7 @@ export default function Agents() {
           if (r.status === 'fulfilled' && r.value && !r.value.error) {
             map.set(addr, r.value as AgentStats);
           } else {
-            map.set(addr, zeroStats(entries[i].address));
+            map.set(addr, zeroStats());
           }
         });
         setStatsMap(map);
