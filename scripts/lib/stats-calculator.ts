@@ -68,19 +68,30 @@ async function fetchStats(address: string): Promise<AgentStats> {
   const client = createPublicClient({ chain: baseSepolia, transport: http(RPC_URL) });
 
   try {
-    // ── Get total counts ──────────────────────────────────────────────────────
-    const [loanCount, optionCount] = await Promise.all([
-      client.readContract({ address: LOAN_ENGINE, abi: LOAN_ABI, functionName: 'loanCounter' }),
-      client.readContract({ address: CALL_VAULT,  abi: VAULT_ABI, functionName: 'optionCounter' }),
-    ]) as [bigint, bigint];
+    // ── Get total counts in one multicall ─────────────────────────────────────
+    const counters = await client.multicall({
+      contracts: [
+        { address: LOAN_ENGINE, abi: LOAN_ABI, functionName: 'loanCounter' as const },
+        { address: CALL_VAULT,  abi: VAULT_ABI, functionName: 'optionCounter' as const },
+      ],
+      allowFailure: false,
+    }) as [bigint, bigint];
+    const [loanCount, optionCount] = counters;
 
-    // ── Read all loans in parallel ────────────────────────────────────────────
+    // ── Batch all loan reads into one multicall ───────────────────────────────
     const loanIds = Array.from({ length: Number(loanCount) }, (_, i) => BigInt(i));
-    const loans = await Promise.all(
-      loanIds.map(id => client.readContract({
-        address: LOAN_ENGINE, abi: LOAN_ABI, functionName: 'loans', args: [id],
-      }))
-    ) as any[][];
+    const loanResults = loanIds.length > 0
+      ? await client.multicall({
+          contracts: loanIds.map(id => ({
+            address: LOAN_ENGINE as `0x${string}`, abi: LOAN_ABI,
+            functionName: 'loans' as const, args: [id] as const,
+          })),
+          allowFailure: true,
+        })
+      : [];
+    const loans = loanResults
+      .map(r => r.status === 'success' ? r.result as any[] : null)
+      .filter((l): l is any[] => l !== null);
 
     // loan[0]=borrower, loan[1]=lender, loan[4]=principal, loan[5]=interest,
     // loan[9]=active, loan[10]=repaid
@@ -107,13 +118,20 @@ async function fetchStats(address: string): Promise<AgentStats> {
       }
     }
 
-    // ── Read all options in parallel ──────────────────────────────────────────
+    // ── Batch all option reads into one multicall ─────────────────────────────
     const optionIds = Array.from({ length: Number(optionCount) }, (_, i) => BigInt(i));
-    const options = await Promise.all(
-      optionIds.map(id => client.readContract({
-        address: CALL_VAULT, abi: VAULT_ABI, functionName: 'options', args: [id],
-      }))
-    ) as any[][];
+    const optionResults = optionIds.length > 0
+      ? await client.multicall({
+          contracts: optionIds.map(id => ({
+            address: CALL_VAULT as `0x${string}`, abi: VAULT_ABI,
+            functionName: 'options' as const, args: [id] as const,
+          })),
+          allowFailure: true,
+        })
+      : [];
+    const options = optionResults
+      .map(r => r.status === 'success' ? r.result as any[] : null)
+      .filter((o): o is any[] => o !== null);
 
     // option[0]=writer, option[1]=buyer, option[6]=premium, option[7]=exercised
     const optionsWritten   = options.filter(o => o[0]?.toLowerCase() === addr).length;

@@ -151,19 +151,21 @@ const AgentCard: React.FC<{
         </div>
       </div>
 
-      {/* Deal counters */}
-      {stats && stats.totalDeals > 0 && (
-        <div className="grid grid-cols-2 gap-2">
-          <div className="bg-cyber-bg/50 rounded-md px-2.5 py-1.5 text-center">
-            <div className="text-[9px] text-gray-600 uppercase tracking-wider">Loans</div>
-            <div className="text-xs font-semibold text-white">{stats.loansCreated + stats.loansFunded}</div>
-          </div>
-          <div className="bg-cyber-bg/50 rounded-md px-2.5 py-1.5 text-center">
-            <div className="text-[9px] text-gray-600 uppercase tracking-wider">Options</div>
-            <div className="text-xs font-semibold text-white">{stats.optionsWritten + stats.optionsSold}</div>
-          </div>
+      {/* Deal counters — always shown */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="bg-cyber-bg/50 rounded-md px-2.5 py-1.5 text-center">
+          <div className="text-[9px] text-gray-600 uppercase tracking-wider">Loans</div>
+          {stats
+            ? <div className="text-xs font-semibold text-white">{stats.loansCreated + stats.loansFunded}</div>
+            : <div className="h-3 w-6 bg-white/5 rounded animate-pulse mx-auto mt-1" />}
         </div>
-      )}
+        <div className="bg-cyber-bg/50 rounded-md px-2.5 py-1.5 text-center">
+          <div className="text-[9px] text-gray-600 uppercase tracking-wider">Options</div>
+          {stats
+            ? <div className="text-xs font-semibold text-white">{stats.optionsWritten + stats.optionsSold}</div>
+            : <div className="h-3 w-6 bg-white/5 rounded animate-pulse mx-auto mt-1" />}
+        </div>
+      </div>
 
       {/* Last seen (external only) */}
       {!isInternal && (
@@ -338,14 +340,22 @@ export default function Agents() {
       if (res.ok) {
         const entries: AgentEntry[] = await res.json();
         setRegistry(entries);
-        // Fetch stats for all entries in parallel (best-effort)
+        // Fetch stats for all entries in parallel (best-effort, always populate map)
         const results = await Promise.allSettled(
           entries.map(e => fetch(`/api/agents/${e.address}/stats`).then(r => r.json()))
         );
         const map = new Map<string, AgentStats>();
+        const zeroStats = (address: string): AgentStats => ({
+          address, loansCreated: 0, loansFunded: 0, loansRepaid: 0,
+          optionsWritten: 0, optionsSold: 0, optionsBought: 0, optionsExercised: 0,
+          totalUsdcVolume: '0', estimatedPnlUsdc: '0', totalDeals: 0, dataWindowBlocks: -1,
+        });
         results.forEach((r, i) => {
+          const addr = entries[i].address.toLowerCase();
           if (r.status === 'fulfilled' && r.value && !r.value.error) {
-            map.set(entries[i].address.toLowerCase(), r.value as AgentStats);
+            map.set(addr, r.value as AgentStats);
+          } else {
+            map.set(addr, zeroStats(entries[i].address));
           }
         });
         setStatsMap(map);
