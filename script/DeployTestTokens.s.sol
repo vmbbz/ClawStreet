@@ -106,7 +106,7 @@ contract DeployTestTokens is Script {
         vm.stopBroadcast();
 
         console.log("\n=================================================");
-        console.log("DONE — add these to src/config/contracts.ts:");
+        console.log("DONE - add these to src/config/contracts.ts:");
         console.log("=================================================");
         console.log("TEST_TOKENS.WETH:", address(weth));
         console.log("TEST_TOKENS.WBTC:", address(wbtc));

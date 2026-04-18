@@ -52,10 +52,10 @@ const MIN_ETH    = parseUnits('0.002', 18); // abort if any agent below this
 
 const LOAN_ENGINE  = '0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c' as Address;
 const CALL_VAULT   = '0x69730728a0B19b844bc18888d2317987Bc528baE' as Address;
-const CLAW_TOKEN   = '0xD11fC366828445B874F5202109E5f48C4D14FCe4' as Address;
+const BUNDLE_VAULT = '0x86ef420fD3e27c3Ac896c479B19b6A840b97Bee1' as Address;
 const STAKING      = '0xADBf89BA38915B9CF18E0a24Ea3E27F39d920bd3' as Address;
 const MOCK_USDC    = '0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A' as Address;
-const MOCK_NFT     = '0x41119aAd1c69dba3934D0A061d312A52B06B27DF' as Address;
+const TEST_WETH    = (process.env.TEST_WETH_ADDRESS ?? '') as Address;
 const PYTH_ORACLE  = '0xA2aa501b19aff244D90cc15a4Cf739D2725B5729' as Address;
 const ETH_USD_FEED = '0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace';
 
@@ -67,10 +67,11 @@ const ERC20_ABI = parseAbi([
   'function allowance(address owner, address spender) external view returns (uint256)',
 ]);
 
-const ERC721_ABI = parseAbi([
-  'function setApprovalForAll(address operator, bool approved) external',
-  'function isApprovedForAll(address owner, address operator) external view returns (bool)',
-  'function ownerOf(uint256 tokenId) external view returns (address)',
+const BUNDLE_VAULT_ABI = parseAbi([
+  'function depositBundle(address[] calldata erc20Tokens, uint256[] calldata erc20Amounts, address[] calldata erc721Contracts, uint256[] calldata erc721Ids, string calldata metadataURI) external returns (uint256)',
+  'function approve(address to, uint256 tokenId) external',
+  'function balanceOf(address owner) external view returns (uint256)',
+  'function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256)',
 ]);
 
 const LOAN_ABI = parseAbi([
@@ -199,82 +200,66 @@ function pickScenario(loanCount: bigint, optionCount: bigint): ScenarioType {
   return cycle === 0 ? 'combined' : cycle === 1 ? 'loan' : 'option';
 }
 
-// ─── NFT ownership helper ─────────────────────────────────────────────────────
+// ─── BundleVault helpers ──────────────────────────────────────────────────────
 
-async function findAvailableNftId(
+async function ensureERC20Allowance(
   publicClient: ReturnType<typeof createPublicClient>,
-  ownerAddr: Address,
-): Promise<bigint | null> {
-  // Scan tokens 1-20 to find one Delta still holds (not escrowed)
-  for (let id = 1n; id <= 20n; id++) {
-    try {
-      const owner = await publicClient.readContract({
-        address: MOCK_NFT, abi: ERC721_ABI,
-        functionName: 'ownerOf', args: [id],
-      }) as Address;
-      if (owner.toLowerCase() === ownerAddr.toLowerCase()) return id;
-    } catch {}
-  }
-  return null;
-}
-
-// ─── Repay oldest active Delta loan to free an NFT ───────────────────────────
-
-async function repayOldestActiveLoan(
-  publicClient: ReturnType<typeof createPublicClient>,
-  wallets: Record<string, ReturnType<typeof createWalletClient>>,
-  accounts: Record<string, { address: Address }>,
+  wallet: ReturnType<typeof createWalletClient>,
+  token: Address,
+  owner: Address,
+  spender: Address,
+  amount: bigint,
+  label: string,
+  agentName: string,
   txs: TxRecord[],
-): Promise<boolean> {
-  const loanCount = await publicClient.readContract({
-    address: LOAN_ENGINE, abi: LOAN_ABI, functionName: 'loanCounter',
+) {
+  const allowance = await publicClient.readContract({
+    address: token, abi: ERC20_ABI, functionName: 'allowance', args: [owner, spender],
   }) as bigint;
-
-  for (let id = 0n; id < loanCount; id++) {
-    const loan = await publicClient.readContract({
-      address: LOAN_ENGINE, abi: LOAN_ABI, functionName: 'loans', args: [id],
-    }) as any[];
-
-    const isBorrower = (loan[0] as string).toLowerCase() === accounts.delta.address.toLowerCase();
-    const isActive   = loan[9] as boolean;
-    const isRepaid   = loan[10] as boolean;
-
-    if (!isBorrower || !isActive || isRepaid) continue;
-
-    const repayAmount = (loan[4] as bigint) + (loan[5] as bigint);
-    const deltaUsdc   = await publicClient.readContract({
-      address: MOCK_USDC, abi: ERC20_ABI,
-      functionName: 'balanceOf', args: [accounts.delta.address],
-    }) as bigint;
-
-    if (deltaUsdc < repayAmount) {
-      console.log(`  ⚠️  Delta needs ${formatUnits(repayAmount, 6)} USDC to repay loan #${id} (has ${formatUnits(deltaUsdc, 6)})`);
-      continue;
-    }
-
-    // Approve USDC for repayment
-    const allowance = await publicClient.readContract({
-      address: MOCK_USDC, abi: ERC20_ABI,
-      functionName: 'allowance', args: [accounts.delta.address, LOAN_ENGINE],
-    }) as bigint;
-    if (allowance < repayAmount) {
-      const h = await wallets.delta.writeContract({
-        address: MOCK_USDC, abi: ERC20_ABI,
-        functionName: 'approve', args: [LOAN_ENGINE, repayAmount],
-      }) as Hash;
-      await waitAndLog(publicClient, h, `Delta: approve USDC → LoanEngine (repay)`, 'BorrowerAgent_Delta', txs);
-    }
-
-    const h = await wallets.delta.writeContract({
-      address: LOAN_ENGINE, abi: LOAN_ABI,
-      functionName: 'repayLoan', args: [id],
+  if (allowance < amount) {
+    const h = await wallet.writeContract({
+      address: token, abi: ERC20_ABI,
+      functionName: 'approve', args: [spender, amount * 10n],
     }) as Hash;
-    await waitAndLog(publicClient, h, `Delta: repayLoan #${id} (frees NFT)`, 'BorrowerAgent_Delta', txs);
-    console.log(`  → NFT freed, ready for next loan cycle`);
-    return true;
+    await waitAndLog(publicClient, h, label, agentName, txs);
   }
-  return false;
 }
+
+async function depositAndGetBundleId(
+  publicClient: ReturnType<typeof createPublicClient>,
+  wallet: ReturnType<typeof createWalletClient>,
+  owner: Address,
+  wethAmount: bigint,
+  agentName: string,
+  txs: TxRecord[],
+): Promise<bigint | null> {
+  // Approve tWETH to BundleVault
+  await ensureERC20Allowance(
+    publicClient, wallet, TEST_WETH, owner, BUNDLE_VAULT, wethAmount,
+    `${agentName}: approve tWETH → BundleVault`, agentName, txs,
+  );
+
+  // Deposit into BundleVault
+  const depositHash = await wallet.writeContract({
+    address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI,
+    functionName: 'depositBundle',
+    args: [[TEST_WETH], [wethAmount], [], [], ''],
+  }) as Hash;
+  await waitAndLog(publicClient, depositHash, `${agentName}: depositBundle (${formatUnits(wethAmount, 18)} tWETH)`, agentName, txs);
+
+  // Resolve new bundle ID
+  const bal = await publicClient.readContract({
+    address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI, functionName: 'balanceOf', args: [owner],
+  }) as bigint;
+  if (bal === 0n) return null;
+
+  const bundleId = await publicClient.readContract({
+    address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI,
+    functionName: 'tokenOfOwnerByIndex', args: [owner, bal - 1n],
+  }) as bigint;
+  return bundleId;
+}
+
 
 // ─── Core cycle ───────────────────────────────────────────────────────────────
 
@@ -368,98 +353,113 @@ async function runCycle(
   // ── Loan scenario ─────────────────────────────────────────────────────────
 
   if (scenario === 'loan' || scenario === 'combined') {
-    section('LOAN — Creating open listing');
+    section('LOAN — Creating open listing (BundleVault)');
 
-    // Ensure Delta has setApprovalForAll
-    const isApproved = await publicClient.readContract({
-      address: MOCK_NFT, abi: ERC721_ABI,
-      functionName: 'isApprovedForAll',
-      args: [accounts.delta.address, LOAN_ENGINE],
-    }) as boolean;
-
-    if (!isApproved) {
-      const h = await wallets.delta.writeContract({
-        address: MOCK_NFT, abi: ERC721_ABI,
-        functionName: 'setApprovalForAll', args: [LOAN_ENGINE, true],
-      }) as Hash;
-      await waitAndLog(publicClient, h, 'Delta: setApprovalForAll(LoanEngine, true)', 'BorrowerAgent_Delta', txs);
-    }
-
-    let nftId = await findAvailableNftId(publicClient, accounts.delta.address);
-    if (!nftId) {
-      console.log('  Delta has no free NFTs — attempting to repay oldest active loan...');
-      await repayOldestActiveLoan(publicClient, wallets, accounts, txs);
-      nftId = await findAvailableNftId(publicClient, accounts.delta.address);
-    }
-    if (!nftId) {
-      console.warn('  ⚠️  Delta still has no free NFTs — skipping loan creation');
+    if (!TEST_WETH) {
+      console.warn('  ⚠️  TEST_WETH_ADDRESS not set — skipping loan scenario. Deploy TestTokens first.');
     } else {
-      const principal = parseUnits('400', 6);
-      const interest  = parseUnits('24', 6);
-      const h = await wallets.delta.writeContract({
-        address: LOAN_ENGINE, abi: LOAN_ABI,
-        functionName: 'createLoanOffer',
-        args: [MOCK_NFT, nftId, principal, interest, BigInt(14 * 86400)],
-      }) as Hash;
-      await waitAndLog(publicClient, h, `Delta: createLoanOffer (NFT #${nftId}, 400 USDC, 14d)`, 'BorrowerAgent_Delta', txs);
-      const newLoanId = loanCount; // 0-indexed: current counter is the new ID
-      openLoanIds.push(newLoanId);
-      usdcVolume += principal;
-      console.log(`  → Loan #${newLoanId} open for external funding at /market`);
+      const wethAmount = parseUnits('0.5', 18);
+      const deltaWeth  = await publicClient.readContract({
+        address: TEST_WETH, abi: ERC20_ABI,
+        functionName: 'balanceOf', args: [accounts.delta.address],
+      }) as bigint;
+
+      if (deltaWeth < wethAmount) {
+        console.warn(`  ⚠️  Delta has insufficient tWETH (${formatUnits(deltaWeth, 18)}). Requesting from faucet...`);
+        // Self-faucet: spawn faucet script
+        const { execSync } = await import('child_process');
+        try {
+          execSync(`npx tsx scripts/faucet-weth.ts --to ${accounts.delta.address}`, { stdio: 'inherit' });
+        } catch {
+          console.warn('  ⚠️  Faucet call failed — check TEST_WETH_ADDRESS and AGENT1_PRIVATE_KEY');
+        }
+      }
+
+      const bundleId = await depositAndGetBundleId(
+        publicClient, wallets.delta, accounts.delta.address,
+        wethAmount, 'BorrowerAgent_Delta', txs,
+      );
+
+      if (bundleId === null) {
+        console.warn('  ⚠️  BundleVault deposit failed — skipping loan creation');
+      } else {
+        // Approve bundle NFT to LoanEngine
+        const approveH = await wallets.delta.writeContract({
+          address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI,
+          functionName: 'approve', args: [LOAN_ENGINE, bundleId],
+        }) as Hash;
+        await waitAndLog(publicClient, approveH, `Delta: approve BundleNFT #${bundleId} → LoanEngine`, 'BorrowerAgent_Delta', txs);
+
+        const principal = parseUnits('400', 6);
+        const interest  = parseUnits('24', 6);
+        const h = await wallets.delta.writeContract({
+          address: LOAN_ENGINE, abi: LOAN_ABI,
+          functionName: 'createLoanOffer',
+          args: [BUNDLE_VAULT, bundleId, principal, interest, BigInt(14 * 86400)],
+        }) as Hash;
+        await waitAndLog(publicClient, h, `Delta: createLoanOffer (BundleNFT #${bundleId}, 400 USDC, 14d)`, 'BorrowerAgent_Delta', txs);
+        const newLoanId = loanCount;
+        openLoanIds.push(newLoanId);
+        usdcVolume += principal;
+        console.log(`  → Loan #${newLoanId} open for external funding at /market`);
+      }
     }
   }
 
   // ── Option scenario ───────────────────────────────────────────────────────
 
   if (scenario === 'option' || scenario === 'combined') {
-    section('OPTION — Creating open listing');
+    section('OPTION — Creating open listing (tWETH underlying)');
 
-    const underlying = CLAW_TOKEN;
-    const amount     = parseUnits('1', 18);
-    const premium    = parseUnits('40', 6);
-    const strike     = parseUnits('2000', 6);
-    const expiry     = BigInt(Math.floor(Date.now() / 1000) + 7 * 86400);
+    if (!TEST_WETH) {
+      console.warn('  ⚠️  TEST_WETH_ADDRESS not set — skipping option scenario. Deploy TestTokens first.');
+    } else {
+      const underlying = TEST_WETH;
+      const amount     = parseUnits('0.5', 18); // 0.5 tWETH
+      const premium    = parseUnits('40', 6);
+      const strike     = parseUnits('2000', 6);
+      const expiry     = BigInt(Math.floor(Date.now() / 1000) + 7 * 86400);
 
-    // Approve underlying to CallVault
-    const allowance = await publicClient.readContract({
-      address: underlying, abi: ERC20_ABI,
-      functionName: 'allowance',
-      args: [accounts.epsilon.address, CALL_VAULT],
-    }) as bigint;
+      // Check tWETH balance and auto-faucet if needed
+      const epsilonWeth = await publicClient.readContract({
+        address: TEST_WETH, abi: ERC20_ABI,
+        functionName: 'balanceOf', args: [accounts.epsilon.address],
+      }) as bigint;
+      if (epsilonWeth < amount) {
+        console.warn(`  ⚠️  Epsilon has insufficient tWETH (${formatUnits(epsilonWeth, 18)}). Requesting from faucet...`);
+        const { execSync } = await import('child_process');
+        try {
+          execSync(`npx tsx scripts/faucet-weth.ts --to ${accounts.epsilon.address}`, { stdio: 'inherit' });
+        } catch {
+          console.warn('  ⚠️  Faucet call failed — check TEST_WETH_ADDRESS and AGENT1_PRIVATE_KEY');
+        }
+      }
 
-    if (allowance < amount) {
-      const h = await wallets.epsilon.writeContract({
+      // Approve tWETH to CallVault
+      const allowance = await publicClient.readContract({
         address: underlying, abi: ERC20_ABI,
-        functionName: 'approve', args: [CALL_VAULT, parseUnits('10', 18)],
-      }) as Hash;
-      await waitAndLog(publicClient, h, 'Epsilon: approve STREET → CallVault', 'HedgeAgent_Epsilon', txs);
-    }
+        functionName: 'allowance', args: [accounts.epsilon.address, CALL_VAULT],
+      }) as bigint;
+      if (allowance < amount) {
+        const h = await wallets.epsilon.writeContract({
+          address: underlying, abi: ERC20_ABI,
+          functionName: 'approve', args: [CALL_VAULT, parseUnits('5', 18)],
+        }) as Hash;
+        await waitAndLog(publicClient, h, 'Epsilon: approve tWETH → CallVault', 'HedgeAgent_Epsilon', txs);
+      }
 
-    // Approve USDC for premium (if needed)
-    const usdcAllowance = await publicClient.readContract({
-      address: MOCK_USDC, abi: ERC20_ABI,
-      functionName: 'allowance',
-      args: [accounts.epsilon.address, CALL_VAULT],
-    }) as bigint;
-    if (usdcAllowance < premium) {
       const h = await wallets.epsilon.writeContract({
-        address: MOCK_USDC, abi: ERC20_ABI,
-        functionName: 'approve', args: [CALL_VAULT, parseUnits('200', 6)],
+        address: CALL_VAULT, abi: CALL_VAULT_ABI,
+        functionName: 'writeCoveredCall',
+        args: [underlying, amount, strike, expiry, premium],
       }) as Hash;
-      await waitAndLog(publicClient, h, 'Epsilon: approve USDC → CallVault', 'HedgeAgent_Epsilon', txs);
+      await waitAndLog(publicClient, h, `Epsilon: writeCoveredCall (0.5 tWETH, strike 2000 USDC, 7d, premium 40 USDC)`, 'HedgeAgent_Epsilon', txs);
+
+      const newOptionId = optionCount;
+      openOptionIds.push(newOptionId);
+      usdcVolume += premium;
+      console.log(`  → Option #${newOptionId} open for external purchase at /market`);
     }
-
-    const h = await wallets.epsilon.writeContract({
-      address: CALL_VAULT, abi: CALL_VAULT_ABI,
-      functionName: 'writeCoveredCall',
-      args: [underlying, amount, strike, expiry, premium],
-    }) as Hash;
-    await waitAndLog(publicClient, h, `Epsilon: writeCoveredCall (1 STREET, strike 2000 USDC, 7d, premium 40 USDC)`, 'HedgeAgent_Epsilon', txs);
-
-    const newOptionId = optionCount;
-    openOptionIds.push(newOptionId);
-    usdcVolume += premium;
-    console.log(`  → Option #${newOptionId} open for external purchase at /market`);
   }
 
   // ── Staking scenario ─────────────────────────────────────────────────────

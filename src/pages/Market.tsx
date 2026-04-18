@@ -129,10 +129,12 @@ type SortOrder = 'newest' | 'oldest' | 'value_desc' | 'value_asc';
 
 // ─── MockUSDC Faucet Banner ───────────────────────────────────────────────────
 
+type FaucetKey = 'usdc' | 'weth' | 'wbtc' | 'link';
+
 function FaucetBanner({ address }: { address: string }) {
-  const [claiming, setClaiming] = useState(false);
-  const [claimed, setClaimed] = useState(false);
-  const [error, setError] = useState('');
+  const [claiming, setClaiming] = useState<FaucetKey | null>(null);
+  const [claimed, setClaimed] = useState<Set<FaucetKey>>(new Set());
+  const [errors, setErrors] = useState<Partial<Record<FaucetKey, string>>>({});
 
   const { data: usdcBalance, refetch: refetchBalance } = useReadContract({
     address: CONTRACT_ADDRESSES.MOCK_USDC,
@@ -143,52 +145,94 @@ function FaucetBanner({ address }: { address: string }) {
 
   const balanceNum = usdcBalance ? Number(formatUnits(usdcBalance as bigint, 6)) : null;
   const needsUsdc = balanceNum !== null && balanceNum < 100;
+  const hasTestTokens = !!CONTRACT_ADDRESSES.TEST_TOKENS?.WETH;
 
-  const handleClaim = async () => {
-    setClaiming(true);
-    setError('');
+  const handleClaim = async (token: FaucetKey) => {
+    setClaiming(token);
+    setErrors(prev => ({ ...prev, [token]: undefined }));
     try {
-      const r = await fetch('/api/faucet/usdc', {
+      const endpoint = token === 'usdc' ? '/api/faucet/usdc'
+        : token === 'weth' ? '/api/faucet/weth'
+        : token === 'wbtc' ? '/api/faucet/wbtc'
+        : '/api/faucet/link';
+      const r = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ address }),
       });
       const data = await r.json();
       if (data.success) {
-        setClaimed(true);
-        toast.tx('1000 MockUSDC sent!', data.txHash);
-        setTimeout(refetchBalance, 5000);
+        setClaimed(prev => new Set([...prev, token]));
+        const labels: Record<FaucetKey, string> = {
+          usdc: '1000 MockUSDC', weth: '5 tWETH', wbtc: '0.1 tWBTC', link: '100 tLINK',
+        };
+        toast.tx(`${labels[token]} sent!`, data.txHash);
+        if (token === 'usdc') setTimeout(refetchBalance, 5000);
       } else {
-        setError(data.error ?? 'Faucet error');
+        setErrors(prev => ({ ...prev, [token]: data.error ?? 'Faucet error' }));
       }
     } catch {
-      setError('Network error — try again');
+      setErrors(prev => ({ ...prev, [token]: 'Network error' }));
     } finally {
-      setClaiming(false);
+      setClaiming(null);
     }
   };
 
-  if (!needsUsdc && !claimed) return null;
+  const showBanner = (needsUsdc && !claimed.has('usdc')) || hasTestTokens;
+  if (!showBanner) return null;
 
   return (
-    <div className="mb-6 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg flex items-center justify-between gap-3 text-sm">
-      <div className="flex items-center gap-2 text-blue-300">
-        <Droplets size={16} />
-        <span>
-          {claimed
-            ? '1000 MockUSDC on the way — refresh in a few seconds'
-            : `Your wallet has ${balanceNum?.toFixed(0) ?? 0} MockUSDC — get test tokens to fund deals`}
-        </span>
-        {error && <span className="text-red-400 ml-2">{error}</span>}
-      </div>
-      {!claimed && (
-        <button
-          onClick={handleClaim}
-          disabled={claiming}
-          className="flex-shrink-0 px-3 py-1.5 bg-blue-500 hover:bg-blue-400 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition-colors"
-        >
-          {claiming ? 'Sending...' : 'Get 1000 MockUSDC'}
-        </button>
+    <div className="mb-6 space-y-2">
+      {/* USDC row */}
+      {(needsUsdc || claimed.has('usdc')) && (
+        <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg flex items-center justify-between gap-3 text-sm">
+          <div className="flex items-center gap-2 text-blue-300">
+            <Droplets size={16} />
+            <span>
+              {claimed.has('usdc')
+                ? '1000 MockUSDC on the way — refresh in a few seconds'
+                : `Your wallet has ${balanceNum?.toFixed(0) ?? 0} MockUSDC — get test tokens to fund deals`}
+            </span>
+            {errors.usdc && <span className="text-red-400 ml-2">{errors.usdc}</span>}
+          </div>
+          {!claimed.has('usdc') && (
+            <button
+              onClick={() => handleClaim('usdc')}
+              disabled={claiming !== null}
+              className="flex-shrink-0 px-3 py-1.5 bg-blue-500 hover:bg-blue-400 disabled:opacity-50 text-white rounded-lg text-xs font-semibold transition-colors"
+            >
+              {claiming === 'usdc' ? 'Sending...' : 'Get 1000 MockUSDC'}
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Bundle collateral row — only shown when TestTokens are deployed */}
+      {hasTestTokens && (
+        <div className="p-3 bg-teal-500/8 border border-teal-500/20 rounded-lg text-sm">
+          <div className="flex items-center gap-2 text-teal-300 mb-2">
+            <Droplets size={16} />
+            <span>Bundle collateral faucets — deposit into BundleVault to create loan collateral</span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {(['weth', 'wbtc', 'link'] as const).map(token => {
+              const labels = { weth: '5 tWETH', wbtc: '0.1 tWBTC', link: '100 tLINK' };
+              const isClaimed = claimed.has(token);
+              return (
+                <div key={token} className="flex items-center gap-1">
+                  <button
+                    onClick={() => handleClaim(token)}
+                    disabled={claiming !== null || isClaimed}
+                    className="px-2.5 py-1 bg-teal-600/40 hover:bg-teal-500/50 disabled:opacity-50 text-teal-200 rounded text-xs font-semibold transition-colors border border-teal-500/30"
+                  >
+                    {isClaimed ? `✓ ${labels[token]} sent` : claiming === token ? 'Sending...' : `Get ${labels[token]}`}
+                  </button>
+                  {errors[token] && <span className="text-red-400 text-xs">{errors[token]}</span>}
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );

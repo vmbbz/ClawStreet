@@ -14,37 +14,38 @@ import {
 import { notifyAgent } from './scripts/lib/contact-notifier.js';
 import { getAddressStats } from './scripts/lib/stats-calculator.js';
 import {
-  relayDeal, autoExecuteAcceptedOffer, isInternalAgent, buildRelayIntentMessage,
+  autoExecuteAcceptedOffer, isInternalAgent,
 } from './scripts/lib/deal-relay.js';
 
 // ─── Rate limits (in-memory) ──────────────────────────────────────────────────
 // Maps lowercase address → timestamp of last claim
 const faucetClaims    = new Map<string, number>();
+const wethFaucetClaims = new Map<string, number>();
+const wbtcFaucetClaims = new Map<string, number>();
+const linkFaucetClaims = new Map<string, number>();
 const FAUCET_COOLDOWN_MS = 60 * 60 * 1000; // 1 hour
 
 // Maps lowercase address → { count, windowStart }
 const announceCounts  = new Map<string, { count: number; windowStart: number }>();
 const negotiateCounts = new Map<string, { count: number; windowStart: number }>();
-const relayCounts     = new Map<string, { count: number; windowStart: number }>();
 const ANNOUNCE_LIMIT  = 5;   // max 5 announces per address per 10 minutes
 const NEGOTIATE_LIMIT = 10;  // max 10 offers per address per 10 minutes
-const RELAY_LIMIT     = 3;   // max 3 relay txs per address per hour
 const RATE_WINDOW_MS  = 10 * 60 * 1000; // 10-minute sliding window
-const RELAY_WINDOW_MS = 60 * 60 * 1000; // 1-hour window for relay
 
 function checkRateLimit(
   map: Map<string, { count: number; windowStart: number }>,
   key: string,
   limit: number,
+  windowMs: number = RATE_WINDOW_MS,
 ): { allowed: boolean; retryAfterSeconds: number } {
   const now  = Date.now();
   const rec  = map.get(key);
-  if (!rec || now - rec.windowStart > RATE_WINDOW_MS) {
+  if (!rec || now - rec.windowStart > windowMs) {
     map.set(key, { count: 1, windowStart: now });
     return { allowed: true, retryAfterSeconds: 0 };
   }
   if (rec.count >= limit) {
-    const retryAfterSeconds = Math.ceil((RATE_WINDOW_MS - (now - rec.windowStart)) / 1000);
+    const retryAfterSeconds = Math.ceil((windowMs - (now - rec.windowStart)) / 1000);
     return { allowed: false, retryAfterSeconds };
   }
   rec.count++;
@@ -283,6 +284,64 @@ async function startServer() {
     });
   });
 
+  // ─── Test Token Faucets (for bundling collateral) ─────────────────────────
+  // These require deploying script/DeployTestTokens.s.sol first and setting
+  // TEST_WETH_ADDRESS, TEST_WBTC_ADDRESS, TEST_LINK_ADDRESS in .env
+
+  function makeTokenFaucet(
+    script: string,
+    claimsMap: Map<string, number>,
+    tokenLabel: string,
+    envVar: string,
+  ) {
+    return async (req: express.Request, res: express.Response) => {
+      const { address } = req.body ?? {};
+      if (!address || !/^0x[0-9a-fA-F]{40}$/.test(address)) {
+        return res.status(400).json({ success: false, error: 'Invalid address' });
+      }
+      if (!process.env[envVar]) {
+        return res.status(503).json({ success: false, error: `${tokenLabel} not yet deployed — ${envVar} not set` });
+      }
+      const key = address.toLowerCase();
+      const now = Date.now();
+      const lastClaim = claimsMap.get(key) ?? 0;
+      if (now - lastClaim < FAUCET_COOLDOWN_MS) {
+        const minutesLeft = Math.ceil((FAUCET_COOLDOWN_MS - (now - lastClaim)) / 60_000);
+        return res.status(429).json({ success: false, error: `Rate limited — try again in ${minutesLeft} minute${minutesLeft !== 1 ? 's' : ''}` });
+      }
+      claimsMap.set(key, now);
+      const child = spawn('npx', ['tsx', `scripts/${script}`, '--to', address], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        shell: true,
+      });
+      let output = '';
+      child.stdout?.on('data', (d: Buffer) => { output += d.toString(); });
+      child.stderr?.on('data', (d: Buffer) => { output += d.toString(); });
+      child.on('close', (code) => {
+        try {
+          const result = JSON.parse(output.trim().split('\n').pop() ?? '{}');
+          if (result.success) {
+            res.status(202).json(result);
+          } else {
+            claimsMap.delete(key);
+            res.status(500).json({ success: false, error: result.error ?? 'Mint failed' });
+          }
+        } catch {
+          claimsMap.delete(key);
+          res.status(500).json({ success: false, error: `Faucet script error (exit ${code})` });
+        }
+      });
+      child.on('error', (err) => {
+        claimsMap.delete(key);
+        res.status(500).json({ success: false, error: err.message });
+      });
+    };
+  }
+
+  app.post('/api/faucet/weth', makeTokenFaucet('faucet-weth.ts', wethFaucetClaims, 'tWETH', 'TEST_WETH_ADDRESS'));
+  app.post('/api/faucet/wbtc', makeTokenFaucet('faucet-wbtc.ts', wbtcFaucetClaims, 'tWBTC', 'TEST_WBTC_ADDRESS'));
+  app.post('/api/faucet/link', makeTokenFaucet('faucet-link.ts', linkFaucetClaims, 'tLINK', 'TEST_LINK_ADDRESS'));
+
   // ─── Agent API Routes ──────────────────────────────────────────────────────
 
   // Agent API Routes
@@ -352,53 +411,6 @@ async function startServer() {
       });
     } catch (error) {
       res.status(400).json({ success: false, error: String(error) });
-    }
-  });
-
-  // ─── Gas Relay API ────────────────────────────────────────────────────────
-
-  // POST /api/agents/deals/relay — broadcast a deal tx on behalf of an external agent
-  // The agent signs an EIP-191 intent; the server relayer wallet pays gas.
-  app.post('/api/agents/deals/relay', async (req, res) => {
-    const { from, type, params, timestamp, signature } = req.body ?? {};
-    if (!from || !type || !params || !timestamp || !signature) {
-      return res.status(400).json({ success: false, error: 'Missing required fields: from, type, params, timestamp, signature' });
-    }
-    const validTypes = ['buy_option', 'accept_loan', 'covered_call', 'loan_offer'];
-    if (!validTypes.includes(type)) {
-      return res.status(400).json({ success: false, error: `type must be one of: ${validTypes.join(', ')}` });
-    }
-    if (!/^0x[0-9a-fA-F]{40}$/.test(from)) {
-      return res.status(400).json({ success: false, error: 'Invalid from address' });
-    }
-    // Rate limit: 3 relay requests per address per hour
-    const rl = checkRateLimit(relayCounts, (from as string).toLowerCase(), RELAY_LIMIT);
-    if (!rl.allowed) {
-      return res.status(429).json({ success: false, error: `Rate limited — try again in ${rl.retryAfterSeconds}s` });
-    }
-
-    try {
-      const result = await relayDeal({ from, type, params, timestamp: Number(timestamp), signature });
-      if (!result.success) return res.status(400).json(result);
-      console.log(`[relay] ${type} for ${from} → tx ${result.txHash} deal #${result.dealId}`);
-      res.json(result);
-    } catch (e) {
-      res.status(500).json({ success: false, error: String(e) });
-    }
-  });
-
-  // GET /api/agents/deals/relay/intent — helper: returns the canonical message to sign
-  app.get('/api/agents/deals/relay/intent', (req, res) => {
-    const { type, params, timestamp } = req.query as Record<string, string>;
-    if (!type || !params || !timestamp) {
-      return res.status(400).json({ error: 'Query params required: type, params (JSON), timestamp' });
-    }
-    try {
-      const parsed = JSON.parse(params);
-      const message = buildRelayIntentMessage({ type, params: parsed, timestamp: Number(timestamp) });
-      res.json({ message });
-    } catch {
-      res.status(400).json({ error: 'params must be valid JSON' });
     }
   });
 

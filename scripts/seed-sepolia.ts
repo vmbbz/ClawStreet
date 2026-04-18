@@ -59,8 +59,6 @@ const BUNDLE_VAULT = '0x86ef420fD3e27c3Ac896c479B19b6A840b97Bee1' as Address;
 const CLAW_TOKEN   = '0xD11fC366828445B874F5202109E5f48C4D14FCe4' as Address;
 const STAKING      = '0xADBf89BA38915B9CF18E0a24Ea3E27F39d920bd3' as Address;
 const MOCK_USDC    = '0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A' as Address;
-const MOCK_NFT     = '0x41119aAd1c69dba3934D0A061d312A52B06B27DF' as Address;
-
 const TEST_WETH = (process.env.TEST_WETH_ADDRESS ?? '') as Address;
 const TEST_WBTC = (process.env.TEST_WBTC_ADDRESS ?? '') as Address;
 
@@ -212,12 +210,15 @@ async function main() {
   if (DRY_RUN) {
     console.log('\n✅ Dry run complete. Run without --dry-run to execute transactions.');
     console.log('\nPlanned transactions:');
-    console.log('  [LOANS]   Delta: createLoanOffer(MockNFT #1, 500 USDC, 14d, 30 USDC)');
-    console.log('  [LOANS]   Gamma: approve USDC → acceptLoan(loanId, pythVAA)');
-    console.log('  [LOANS]   Delta: createLoanOffer(MockNFT #2, 300 USDC, 30d, 21 USDC) [unfunded]');
-    if (TEST_WETH) {
-      console.log('  [BUNDLE]  Delta: approve TestWETH → approve MockNFT → depositBundle');
-      console.log('  [LOANS]   Delta: createLoanOffer(BundleNFT, 800 USDC, 21d, 56 USDC) [unfunded]');
+    if (!TEST_WETH) {
+      console.log('  ⚠️  TEST_WETH_ADDRESS not set — all loan/bundle/option seeds require it');
+      console.log('  Run: forge script script/DeployTestTokens.s.sol --broadcast');
+    } else {
+      console.log('  [LOANS]   Delta: approve tWETH → depositBundle → createLoanOffer(BundleNFT, 500 USDC, 14d) [Gamma funds]');
+      console.log('  [LOANS]   Delta: approve tWETH → depositBundle → createLoanOffer(BundleNFT, 300 USDC, 30d) [unfunded]');
+      console.log('  [LOANS]   Delta: approve tWETH → depositBundle → createLoanOffer(BundleNFT, 750 USDC, 21d) [unfunded]');
+      console.log('  [BUNDLE]  Delta: approve tWETH → depositBundle (standalone bundle)');
+      console.log('  [LOANS]   Delta: createLoanOffer(BundleNFT, 800 USDC, 21d) [unfunded]');
     }
     console.log('  [OPTIONS] Epsilon: approve TestWETH/STREET → writeCoveredCall(TestWETH, 1 ETH, $2000, 7d, 50 USDC)');
     console.log('  [OPTIONS] Beta: approve USDC → buyOption(optionId)');
@@ -251,109 +252,147 @@ async function main() {
   // ── LOANS ─────────────────────────────────────────────────────────────────
 
   if (!ONLY || ONLY === 'loans') {
-    section('LOANS');
+    section('LOANS (BundleVault collateral)');
 
-    // Re-read loanCounter (may have changed since script started)
-    const currentLoanCount = await publicClient.readContract({ address: LOAN_ENGINE, abi: LOAN_ABI, functionName: 'loanCounter' });
-    let nextLoanId = currentLoanCount;
-    let h: Hash;
-
-    // Grant LoanEngine operator approval for all Delta's NFTs upfront (simpler + avoids tokenId-level race conditions)
-    const isApprovedForAll = await publicClient.readContract({
-      address: MOCK_NFT,
-      abi: parseAbi(['function isApprovedForAll(address owner, address operator) external view returns (bool)']),
-      functionName: 'isApprovedForAll',
-      args: [delta.address, LOAN_ENGINE],
-    });
-    if (!isApprovedForAll) {
-      console.log('\n  → Setting LoanEngine as operator for all Delta NFTs...');
-      const hApprAll = await wallets.delta.writeContract({
-        address: MOCK_NFT, abi: ERC721_ABI,
-        functionName: 'setApprovalForAll',
-        args: [LOAN_ENGINE, true],
-      });
-      await waitAndLog(publicClient, hApprAll, 'Delta: setApprovalForAll(LoanEngine, true)');
-      results.push({ label: 'Delta: setApprovalForAll', hash: hApprAll });
+    if (!TEST_WETH) {
+      console.log('\n⚠️  Skipping loan seeding — TEST_WETH_ADDRESS not set in .env');
+      console.log('   Deploy test tokens first: forge script script/DeployTestTokens.s.sol --broadcast');
     } else {
-      console.log('\n  → LoanEngine already approved for all Delta NFTs');
-    }
+      // Re-read loanCounter (may have changed since script started)
+      const currentLoanCount = await publicClient.readContract({ address: LOAN_ENGINE, abi: LOAN_ABI, functionName: 'loanCounter' });
+      let nextLoanId = currentLoanCount;
+      let h: Hash;
 
-    // ── Loan 0: Delta creates (NFT #1, 500 USDC, 14d), Gamma funds it ───────
-    console.log(`\n[1/3] Loan #0 (NFT #1, 500 USDC, 14d) — current counter: ${currentLoanCount}`);
-    if (currentLoanCount === 0n) {
-      // Need to create it (no token-level approve needed — setApprovalForAll handles it)
+      // Helper: deposit 0.5 tWETH into BundleVault, return bundleId
+      async function mintBundle(wallet: any, owner: any, label: string): Promise<bigint> {
+        const wethAmount = parseUnits('0.5', 18);
+        // Approve tWETH
+        h = await wallet.writeContract({
+          address: TEST_WETH, abi: ERC20_ABI,
+          functionName: 'approve', args: [BUNDLE_VAULT, wethAmount],
+        });
+        await waitAndLog(publicClient, h, `${label}: approve 0.5 tWETH → BundleVault`);
+        results.push({ label: `${label}: approve tWETH`, hash: h });
+        // Deposit
+        h = await wallet.writeContract({
+          address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI,
+          functionName: 'depositBundle',
+          args: [[TEST_WETH], [wethAmount], [], [], ''],
+        });
+        await waitAndLog(publicClient, h, `${label}: depositBundle (0.5 tWETH)`);
+        results.push({ label: `${label}: depositBundle`, hash: h });
+        // Resolve bundle ID
+        const bal = await publicClient.readContract({
+          address: BUNDLE_VAULT, abi: parseAbi(['function balanceOf(address owner) external view returns (uint256)']),
+          functionName: 'balanceOf', args: [owner],
+        }) as bigint;
+        const bundleId = await publicClient.readContract({
+          address: BUNDLE_VAULT, abi: parseAbi(['function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256)']),
+          functionName: 'tokenOfOwnerByIndex', args: [owner, bal - 1n],
+        }) as bigint;
+        return bundleId;
+      }
 
-      h = await wallets.delta.writeContract({
-        address: LOAN_ENGINE, abi: LOAN_ABI,
-        functionName: 'createLoanOffer',
-        args: [MOCK_NFT, 1n, parseUnits('500', 6), parseUnits('30', 6), BigInt(14 * 86400)],
-      });
-      await waitAndLog(publicClient, h, 'Delta: createLoanOffer #0 (500 USDC, 14d)');
-      results.push({ label: 'Delta: createLoanOffer #0', hash: h });
-      nextLoanId = 1n;
-    } else {
-      console.log('  ⏭️  Loan #0 already created — skipping createLoanOffer');
-    }
+      // ── Loan 0: Delta creates (BundleNFT, 500 USDC, 14d), Gamma funds it ────
+      console.log(`\n[1/3] Loan #0 (BundleNFT, 500 USDC, 14d) — current counter: ${currentLoanCount}`);
+      if (currentLoanCount === 0n) {
+        const bundleId0 = await mintBundle(wallets.delta, delta.address, 'Delta');
+        // Approve bundle NFT to LoanEngine
+        h = await wallets.delta.writeContract({
+          address: BUNDLE_VAULT, abi: ERC721_ABI,
+          functionName: 'approve', args: [LOAN_ENGINE, bundleId0],
+        });
+        await waitAndLog(publicClient, h, `Delta: approve BundleNFT #${bundleId0} → LoanEngine`);
+        results.push({ label: 'Delta: approve bundle NFT for loan #0', hash: h });
 
-    // Check if loan #0 is still unfunded (lender == 0x0)
-    const loan0 = await publicClient.readContract({ address: LOAN_ENGINE, abi: parseAbi(['function loans(uint256 loanId) external view returns (address borrower, address lender, address nftContract, uint256 nftId, uint256 principal, uint256 interest, uint256 duration, uint256 startTime, uint256 healthSnapshot, bool active, bool repaid)']), functionName: 'loans', args: [0n] });
-    const loan0Lender = (loan0 as any)[1] as string;
-    const loan0Active = (loan0 as any)[9] as boolean;
+        h = await wallets.delta.writeContract({
+          address: LOAN_ENGINE, abi: LOAN_ABI,
+          functionName: 'createLoanOffer',
+          args: [BUNDLE_VAULT, bundleId0, parseUnits('500', 6), parseUnits('30', 6), BigInt(14 * 86400)],
+        });
+        await waitAndLog(publicClient, h, 'Delta: createLoanOffer #0 (500 USDC, 14d)');
+        results.push({ label: 'Delta: createLoanOffer #0', hash: h });
+        nextLoanId = 1n;
+      } else {
+        console.log('  ⏭️  Loan #0 already created — skipping createLoanOffer');
+      }
 
-    if (loan0Active && loan0Lender === '0x0000000000000000000000000000000000000000') {
-      console.log('\n   Loan #0 is unfunded — Gamma will fund it');
-      h = await wallets.gamma.writeContract({
-        address: MOCK_USDC, abi: ERC20_ABI,
-        functionName: 'approve',
-        args: [LOAN_ENGINE, parseUnits('1000', 6)],
-      });
-      await waitAndLog(publicClient, h, 'Gamma: approve 1000 USDC → LoanEngine');
-      results.push({ label: 'Gamma: approve USDC', hash: h });
+      // Check if loan #0 is still unfunded (lender == 0x0)
+      const loan0 = await publicClient.readContract({ address: LOAN_ENGINE, abi: parseAbi(['function loans(uint256 loanId) external view returns (address borrower, address lender, address nftContract, uint256 nftId, uint256 principal, uint256 interest, uint256 duration, uint256 startTime, uint256 healthSnapshot, bool active, bool repaid)']), functionName: 'loans', args: [0n] });
+      const loan0Lender = (loan0 as any)[1] as string;
+      const loan0Active = (loan0 as any)[9] as boolean;
 
-      h = await wallets.gamma.writeContract({
-        address: LOAN_ENGINE, abi: LOAN_ABI,
-        functionName: 'acceptLoan',
-        args: [0n, priceVAA],
-        value: pythFee,
-      });
-      await waitAndLog(publicClient, h, 'Gamma: acceptLoan #0 ✨ ACTIVE LOAN CREATED');
+      if (loan0Active && loan0Lender === '0x0000000000000000000000000000000000000000') {
+        console.log('\n   Loan #0 is unfunded — Gamma will fund it');
+        h = await wallets.gamma.writeContract({
+          address: MOCK_USDC, abi: ERC20_ABI,
+          functionName: 'approve',
+          args: [LOAN_ENGINE, parseUnits('1000', 6)],
+        });
+        await waitAndLog(publicClient, h, 'Gamma: approve 1000 USDC → LoanEngine');
+        results.push({ label: 'Gamma: approve USDC', hash: h });
+
+        h = await wallets.gamma.writeContract({
+          address: LOAN_ENGINE, abi: LOAN_ABI,
+          functionName: 'acceptLoan',
+          args: [0n, priceVAA],
+          value: pythFee,
+        });
+        await waitAndLog(publicClient, h, 'Gamma: acceptLoan #0 ✨ ACTIVE LOAN CREATED');
       results.push({ label: 'Gamma: acceptLoan #0', hash: h });
     } else {
       console.log('  ⏭️  Loan #0 already funded or inactive — skipping acceptLoan');
     }
 
-    // ── Loan 1: Delta creates (NFT #2, 300 USDC, 30d), unfunded ─────────────
-    console.log('\n[2/3] Loan #1 (NFT #2, 300 USDC, 30d) — open listing');
-    if (nextLoanId <= 1n) {
-      h = await wallets.delta.writeContract({
-        address: LOAN_ENGINE, abi: LOAN_ABI,
-        functionName: 'createLoanOffer',
-        args: [MOCK_NFT, 2n, parseUnits('300', 6), parseUnits('21', 6), BigInt(30 * 86400)],
-      });
-      await waitAndLog(publicClient, h, 'Delta: createLoanOffer #1 (300 USDC, 30d)');
-      results.push({ label: 'Delta: createLoanOffer #1', hash: h });
-      nextLoanId = 2n;
-    } else {
-      console.log('  ⏭️  Loan #1 already created — skipping');
-    }
+      // ── Loan 1: Delta creates (BundleNFT, 300 USDC, 30d), unfunded ──────────
+      console.log('\n[2/3] Loan #1 (BundleNFT, 300 USDC, 30d) — open listing');
+      if (nextLoanId <= 1n) {
+        const bundleId1 = await mintBundle(wallets.delta, delta.address, 'Delta');
+        h = await wallets.delta.writeContract({
+          address: BUNDLE_VAULT, abi: ERC721_ABI,
+          functionName: 'approve', args: [LOAN_ENGINE, bundleId1],
+        });
+        await waitAndLog(publicClient, h, `Delta: approve BundleNFT #${bundleId1} → LoanEngine`);
+        results.push({ label: 'Delta: approve bundle NFT for loan #1', hash: h });
 
-    // ── Loan 2: Delta creates (NFT #3, 750 USDC, 21d), unfunded ─────────────
-    console.log('\n[3/3] Loan #2 (NFT #3, 750 USDC, 21d) — open listing');
-    try {
-      if (nextLoanId <= 2n) {
-      h = await wallets.delta.writeContract({
-        address: LOAN_ENGINE, abi: LOAN_ABI,
-        functionName: 'createLoanOffer',
-        args: [MOCK_NFT, 3n, parseUnits('750', 6), parseUnits('45', 6), BigInt(21 * 86400)],
-      });
-      await waitAndLog(publicClient, h, 'Delta: createLoanOffer #2 (750 USDC, 21d)');
-      results.push({ label: 'Delta: createLoanOffer #2', hash: h });
+        h = await wallets.delta.writeContract({
+          address: LOAN_ENGINE, abi: LOAN_ABI,
+          functionName: 'createLoanOffer',
+          args: [BUNDLE_VAULT, bundleId1, parseUnits('300', 6), parseUnits('21', 6), BigInt(30 * 86400)],
+        });
+        await waitAndLog(publicClient, h, 'Delta: createLoanOffer #1 (300 USDC, 30d)');
+        results.push({ label: 'Delta: createLoanOffer #1', hash: h });
+        nextLoanId = 2n;
       } else {
-        console.log('  ⏭️  Loan #2 already created — skipping');
+        console.log('  ⏭️  Loan #1 already created — skipping');
       }
-    } catch (e) {
-      console.warn('  ⚠️  Loan #2 skipped (NFT #3 may not be available):', (e as Error).message);
-    }
+
+      // ── Loan 2: Delta creates (BundleNFT, 750 USDC, 21d), unfunded ──────────
+      console.log('\n[3/3] Loan #2 (BundleNFT, 750 USDC, 21d) — open listing');
+      try {
+        if (nextLoanId <= 2n) {
+          const bundleId2 = await mintBundle(wallets.delta, delta.address, 'Delta');
+          h = await wallets.delta.writeContract({
+            address: BUNDLE_VAULT, abi: ERC721_ABI,
+            functionName: 'approve', args: [LOAN_ENGINE, bundleId2],
+          });
+          await waitAndLog(publicClient, h, `Delta: approve BundleNFT #${bundleId2} → LoanEngine`);
+          results.push({ label: 'Delta: approve bundle NFT for loan #2', hash: h });
+
+          h = await wallets.delta.writeContract({
+            address: LOAN_ENGINE, abi: LOAN_ABI,
+            functionName: 'createLoanOffer',
+            args: [BUNDLE_VAULT, bundleId2, parseUnits('750', 6), parseUnits('45', 6), BigInt(21 * 86400)],
+          });
+          await waitAndLog(publicClient, h, 'Delta: createLoanOffer #2 (750 USDC, 21d)');
+          results.push({ label: 'Delta: createLoanOffer #2', hash: h });
+        } else {
+          console.log('  ⏭️  Loan #2 already created — skipping');
+        }
+      } catch (e) {
+        console.warn('  ⚠️  Loan #2 skipped:', (e as Error).message);
+      }
+    } // end TEST_WETH guard
   }
 
   // ── BUNDLE + BUNDLED LOAN ─────────────────────────────────────────────────
@@ -365,7 +404,7 @@ async function main() {
     } else {
       section('BUNDLE VAULT');
 
-      console.log('\n[1/2] Delta → bundle [0.5 TestWETH + MockNFT #4] into BundleVault');
+      console.log('\n[1/2] Delta → bundle [0.5 tWETH] into BundleVault');
 
       let h: Hash;
       // Approve TestWETH to BundleVault
@@ -377,47 +416,46 @@ async function main() {
       await waitAndLog(publicClient, h, 'Delta: approve 0.5 tWETH → BundleVault');
       results.push({ label: 'Delta: approve tWETH', hash: h });
 
-      // Approve NFT #4 to BundleVault
-      h = await wallets.delta.writeContract({
-        address: MOCK_NFT, abi: ERC721_ABI,
-        functionName: 'approve',
-        args: [BUNDLE_VAULT, 4n],
-      });
-      await waitAndLog(publicClient, h, 'Delta: approve NFT #4 → BundleVault');
-      results.push({ label: 'Delta: approve NFT #4 to bundle', hash: h });
-
-      // Deposit bundle
+      // Deposit bundle (tWETH only)
       h = await wallets.delta.writeContract({
         address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI,
         functionName: 'depositBundle',
         args: [
           [TEST_WETH],
           [parseUnits('0.5', 18)],
-          [MOCK_NFT],
-          [4n],
-          'ipfs://QmClawStreetBundle001',
+          [],
+          [],
+          '',
         ],
       });
-      await waitAndLog(publicClient, h, 'Delta: depositBundle (0.5 tWETH + NFT #4) ✨ BUNDLE NFT CREATED');
+      await waitAndLog(publicClient, h, 'Delta: depositBundle (0.5 tWETH) ✨ BUNDLE NFT CREATED');
       results.push({ label: 'Delta: depositBundle', hash: h });
 
-      console.log('\n[2/2] Delta → createLoanOffer using bundle NFT as collateral');
-      // Bundle NFT ID starts at 1 (first deposit)
-      // We'll use bundle token ID 1
+      // Resolve the bundle ID we just minted
+      const bundleBal = await publicClient.readContract({
+        address: BUNDLE_VAULT, abi: parseAbi(['function balanceOf(address owner) external view returns (uint256)']),
+        functionName: 'balanceOf', args: [delta.address],
+      }) as bigint;
+      const bundleId = await publicClient.readContract({
+        address: BUNDLE_VAULT, abi: parseAbi(['function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256)']),
+        functionName: 'tokenOfOwnerByIndex', args: [delta.address, bundleBal - 1n],
+      }) as bigint;
+
+      console.log(`\n[2/2] Delta → createLoanOffer using Bundle NFT #${bundleId} as collateral`);
       h = await wallets.delta.writeContract({
         address: BUNDLE_VAULT, abi: parseAbi(['function approve(address to, uint256 tokenId) external']),
         functionName: 'approve',
-        args: [LOAN_ENGINE, 1n],
+        args: [LOAN_ENGINE, bundleId],
       });
-      await waitAndLog(publicClient, h, 'Delta: approve BundleNFT #1 → LoanEngine');
+      await waitAndLog(publicClient, h, `Delta: approve BundleNFT #${bundleId} → LoanEngine`);
       results.push({ label: 'Delta: approve bundle NFT', hash: h });
 
       h = await wallets.delta.writeContract({
         address: LOAN_ENGINE, abi: LOAN_ABI,
         functionName: 'createLoanOffer',
-        args: [BUNDLE_VAULT, 1n, parseUnits('800', 6), parseUnits('56', 6), BigInt(21 * 86400)],
+        args: [BUNDLE_VAULT, bundleId, parseUnits('800', 6), parseUnits('56', 6), BigInt(21 * 86400)],
       });
-      await waitAndLog(publicClient, h, 'Delta: createLoanOffer backed by BundleNFT (800 USDC, 21d)');
+      await waitAndLog(publicClient, h, `Delta: createLoanOffer backed by BundleNFT #${bundleId} (800 USDC, 21d)`);
       results.push({ label: 'Delta: bundled loan offer', hash: h });
     }
   }

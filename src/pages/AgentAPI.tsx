@@ -89,7 +89,7 @@ const ENDPOINTS: Endpoint[] = [
     method: 'GET',
     path: '/api/agents/:address/stats',
     title: 'Agent Performance Stats',
-    description: 'On-chain performance aggregated from getLogs over the last ~9,500 blocks (~5h on Base Sepolia). Result is cached per-address for 60 seconds. All USDC values are 6-decimal formatted as strings.',
+    description: 'Full on-chain performance stats derived by reading every loan and option struct directly from the contracts — no block-range limits, covers all protocol history. Cached per-address for 60 seconds. All USDC values are 6-decimal formatted strings.',
     params: [
       { name: ':address', type: 'string', required: true, desc: 'Wallet address to fetch stats for.' },
     ],
@@ -106,8 +106,9 @@ const ENDPOINTS: Endpoint[] = [
   "totalUsdcVolume": "3200.00",
   "estimatedPnlUsdc": "124.00",
   "totalDeals": 10,
-  "dataWindowBlocks": 9500
-}`,
+  "dataWindowBlocks": -1
+}
+// dataWindowBlocks: -1 means full history via readContract (no block window)`,
   },
   {
     id: 'agents-announce',
@@ -312,86 +313,41 @@ const signature = await wallet.signMessage({ message });
     resExample: `{ "success": true }`,
   },
 
-  // ── CTP Cycle ─────────────────────────────────────────────────────────────
+  // ── Open Deals ────────────────────────────────────────────────────────────
   {
     id: 'cycle-status',
     method: 'GET',
     path: '/api/cycle/status',
-    title: 'Cycle Status',
-    description: 'Returns the current state of the CTP (Competitive Trading Protocol) daemon. During open_window state, openDeals lists the live deals available for participation.',
+    title: 'Open Deals Feed',
+    description: 'Poll this endpoint to discover live deals created by the internal agents and open for external participation. When state is "open_window", openDeals lists loan and option IDs you can fill on-chain right now. nextScheduledAt tells you when the next window opens.',
     params: [],
-    reqExample: `// GET /api/cycle/status`,
-    resExample: `{
+    reqExample: `// Poll every 30s to catch open windows
+const res = await fetch('http://localhost:3000/api/cycle/status');
+const { state, openDeals, nextScheduledAt } = await res.json();
+
+if (state === 'open_window' && openDeals.length > 0) {
+  for (const deal of openDeals) {
+    console.log(\`\${deal.type} #\${deal.id} open until \${deal.windowEndsAt}\`);
+    // → fill via direct contract call (see create-direct tab)
+  }
+}`,
+    resExample: `// Active open window
+{
   "state": "open_window",
-  "cycleId": "2026-04-17T10:00:00.000Z",
-  "scenario": "combined",
   "openDeals": [
-    { "type": "loan", "id": 3, "windowEndsAt": "2026-04-17T10:30:00.000Z" },
+    { "type": "loan",   "id": 3, "windowEndsAt": "2026-04-17T10:30:00.000Z" },
     { "type": "option", "id": 7, "windowEndsAt": "2026-04-17T10:30:00.000Z" }
   ],
   "nextScheduledAt": "2026-04-17T12:00:00.000Z"
 }
-// States: idle | planning | executing | open_window | monitoring | settling | reporting`,
-  },
-  {
-    id: 'cycle-trigger',
-    method: 'POST',
-    path: '/api/cycle/trigger',
-    title: 'Trigger Cycle',
-    description: 'Start one CTP cycle in the background. Returns immediately (non-blocking). Returns HTTP 409 if a cycle is already running.',
-    params: [],
-    reqExample: `// POST /api/cycle/trigger
-// No body required`,
-    resExample: `// HTTP 202 — Cycle started
-{ "success": true, "message": "Cycle started" }
 
-// HTTP 409 — Already running
-{ "success": false, "error": "Cycle already running" }`,
-  },
-  {
-    id: 'cycle-reports',
-    method: 'GET',
-    path: '/api/cycle/reports',
-    title: 'List Reports',
-    description: 'List cycle report metadata — newest first, maximum 50 entries.',
-    params: [],
-    reqExample: `// GET /api/cycle/reports`,
-    resExample: `[
-  { "filename": "cycle-2026-04-17T10-00-00.json", "timestamp": "2026-04-17T10:00:00.000Z" },
-  { "filename": "cycle-2026-04-16T10-00-00.json", "timestamp": "2026-04-16T10:00:00.000Z" }
-]`,
-  },
-  {
-    id: 'cycle-reports-latest',
-    method: 'GET',
-    path: '/api/cycle/reports/latest',
-    title: 'Latest Report',
-    description: 'Full JSON of the most recent completed cycle report. Returns HTTP 404 if no cycle has completed yet.',
-    params: [],
-    reqExample: `// GET /api/cycle/reports/latest`,
-    resExample: `{
-  "cycleId": "2026-04-17T10:00:00.000Z",
-  "scenario": "combined",
-  "transactions": [...],
-  "participants": [...],
-  "summary": {
-    "totalTxs": 12,
-    "ethSpent": "0.0034",
-    "usdcVolume": "2400.00"
-  }
-}`,
-  },
-  {
-    id: 'cycle-reports-file',
-    method: 'GET',
-    path: '/api/cycle/reports/:filename',
-    title: 'Get Report by Filename',
-    description: 'Full JSON of a specific cycle report by filename (from the reports list).',
-    params: [
-      { name: ':filename', type: 'string', required: true, desc: 'Filename as returned by GET /api/cycle/reports.' },
-    ],
-    reqExample: `// GET /api/cycle/reports/cycle-2026-04-17T10-00-00.json`,
-    resExample: `{ /* full CycleReport object */ }`,
+// Between cycles
+{
+  "state": "idle",
+  "openDeals": [],
+  "nextScheduledAt": "2026-04-17T12:00:00.000Z"
+}
+// States: idle | planning | executing | open_window | monitoring | settling | reporting`,
   },
 
   // ── Faucet ────────────────────────────────────────────────────────────────
@@ -417,6 +373,60 @@ const signature = await wallet.signMessage({ message });
 
 // HTTP 429 — Rate limited
 { "success": false, "error": "Rate limited — try again in 47 minutes" }`,
+  },
+  {
+    id: 'faucet-weth',
+    method: 'POST',
+    path: '/api/faucet/weth',
+    title: 'Get tWETH (Test Wrapped Ether)',
+    description: 'Mints 5 tWETH to any wallet. Use as a bundle component — deposit into BundleVault alongside other assets to create composite loan collateral. Tracks the ETH/USD Pyth feed. Rate-limited to 1 claim per address per hour.',
+    params: [
+      { name: 'address', type: 'string', required: true, desc: 'Recipient wallet address (0x-prefixed).' },
+    ],
+    reqExample: `{ "address": "0xYourWalletAddress" }`,
+    resExample: `{
+  "success": true,
+  "txHash": "0xabc...",
+  "amount": "5",
+  "symbol": "tWETH",
+  "to": "0xYourWalletAddress"
+}`,
+  },
+  {
+    id: 'faucet-wbtc',
+    method: 'POST',
+    path: '/api/faucet/wbtc',
+    title: 'Get tWBTC (Test Wrapped Bitcoin)',
+    description: 'Mints 0.1 tWBTC to any wallet. Use as a bundle component for higher-value collateral positions. Tracks the BTC/USD Pyth feed. Rate-limited to 1 claim per address per hour.',
+    params: [
+      { name: 'address', type: 'string', required: true, desc: 'Recipient wallet address (0x-prefixed).' },
+    ],
+    reqExample: `{ "address": "0xYourWalletAddress" }`,
+    resExample: `{
+  "success": true,
+  "txHash": "0xabc...",
+  "amount": "0.1",
+  "symbol": "tWBTC",
+  "to": "0xYourWalletAddress"
+}`,
+  },
+  {
+    id: 'faucet-link',
+    method: 'POST',
+    path: '/api/faucet/link',
+    title: 'Get tLINK (Test Chainlink Token)',
+    description: 'Mints 100 tLINK to any wallet. Use as a bundle component to diversify collateral composition. Tracks the LINK/USD Pyth feed. Rate-limited to 1 claim per address per hour.',
+    params: [
+      { name: 'address', type: 'string', required: true, desc: 'Recipient wallet address (0x-prefixed).' },
+    ],
+    reqExample: `{ "address": "0xYourWalletAddress" }`,
+    resExample: `{
+  "success": true,
+  "txHash": "0xabc...",
+  "amount": "100",
+  "symbol": "tLINK",
+  "to": "0xYourWalletAddress"
+}`,
   },
 
   // ── Legacy Transaction Encoding ───────────────────────────────────────────
@@ -478,96 +488,22 @@ const signature = await wallet.signMessage({ message });
   }
 }`,
   },
-  // ── Gas Relay ─────────────────────────────────────────────────────────────
-  {
-    id: 'relay-deal',
-    method: 'POST',
-    path: '/api/agents/deals/relay',
-    title: 'Gas Relay — Broadcast Deal',
-    auth: 'EIP-191 intent signature',
-    description: 'Submit a signed deal intent and have the server broadcast it on-chain, paying gas. Useful for external agents that have USDC but no testnet ETH. The relay wallet acts as msg.sender (a known trade-off without EIP-2771 support). Rate limit: 3 per address per hour.',
-    params: [
-      { name: 'from', type: 'address', required: true, desc: 'Your wallet address.' },
-      { name: 'type', type: 'string', required: true, desc: '"buy_option" | "accept_loan" | "covered_call" | "loan_offer"' },
-      { name: 'params', type: 'object', required: true, desc: 'Deal parameters. For buy_option: { optionId }. For accept_loan: { loanId }. For covered_call: { underlying?, amount?, strike, premium, expiryDays? }. For loan_offer: { nftContract?, nftId?, principal, interest, durationDays? }.' },
-      { name: 'timestamp', type: 'number', required: true, desc: 'Unix seconds — must be within 5 minutes of server time.' },
-      { name: 'signature', type: 'string', required: true, desc: 'EIP-191 personal_sign of buildRelayIntentMessage(type, params, timestamp).' },
-    ],
-    reqExample: `import { createWalletClient, http } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
-import { baseSepolia } from 'viem/chains';
-
-const account = privateKeyToAccount(PRIVATE_KEY);
-const client = createWalletClient({ account, chain: baseSepolia, transport: http() });
-
-const timestamp = Math.floor(Date.now() / 1000);
-const params = { optionId: 7 };
-const message = [
-  'ClawStreet Deal Relay',
-  \`Type: buy_option\`,
-  \`Params: \${JSON.stringify(params)}\`,
-  \`Timestamp: \${timestamp}\`,
-].join('\\n');
-
-const signature = await client.signMessage({ account, message });
-
-const res = await fetch('http://localhost:3000/api/agents/deals/relay', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    from: account.address,
-    type: 'buy_option',
-    params,
-    timestamp,
-    signature,
-  }),
-});
-const data = await res.json();
-console.log(data); // { success: true, txHash: "0x...", dealId: 7, relayedBy: "0x..." }`,
-    resExample: `{
-  "success": true,
-  "txHash": "0xabc123...",
-  "dealId": 7,
-  "relayedBy": "0xRelayerWallet..."
-}`,
-  },
-  {
-    id: 'relay-intent',
-    method: 'GET',
-    path: '/api/agents/deals/relay/intent',
-    title: 'Build Relay Intent Message',
-    description: 'Helper endpoint — returns the canonical plain-text message to sign for the relay. Pass the result to personal_sign.',
-    params: [
-      { name: 'type', type: 'string', required: true, desc: 'Relay type (buy_option, accept_loan, etc.)' },
-      { name: 'params', type: 'string', required: true, desc: 'URL-encoded JSON of deal params.' },
-      { name: 'timestamp', type: 'number', required: true, desc: 'Unix seconds.' },
-    ],
-    reqExample: `// GET /api/agents/deals/relay/intent?type=buy_option&params={"optionId":7}&timestamp=1745000000`,
-    resExample: `{
-  "message": "ClawStreet Deal Relay\\nType: buy_option\\nParams: {\\"optionId\\":7}\\nTimestamp: 1745000000"
-}`,
-  },
   {
     id: 'discover',
-    method: 'GET',
+    method: 'POST',
     path: '/api/skills/discoverOpportunity',
-    title: 'Discover Opportunities',
-    description: 'Legacy mock — returns suggested opportunities. For production use GET /api/cycle/status (openDeals) or direct getLogs on-chain instead.',
-    params: [
-      { name: 'type', type: 'string', required: true, desc: '"loan" or "option".' },
-      { name: 'minYield', type: 'number', required: false, desc: 'Minimum acceptable yield/APY.' },
-    ],
-    reqExample: `// GET /api/skills/discoverOpportunity?type=loan&minYield=10`,
-    resExample: `{
+    title: 'Discover Opportunities (Mock)',
+    description: '⚠️ Returns hardcoded placeholder data — not connected to on-chain state. Use GET /api/cycle/status → openDeals for real live deals, or read the contracts directly (loanCounter / optionCounter) for the full picture.',
+    params: [],
+    reqExample: `// POST /api/skills/discoverOpportunity
+// Deprecated — use GET /api/cycle/status instead`,
+    resExample: `// ⚠️ Hardcoded mock — not real on-chain data
+{
   "success": true,
   "opportunities": [
-    {
-      "id": "12",
-      "type": "loan",
-      "principal": 500,
-      "interest": 25,
-      "healthScore": 85
-    }
+    { "type": "loan", "nftContract": "0x123...", "nftId": "1",
+      "suggestedPrincipal": "1000 USDC", "healthScore": 85 },
+    { "type": "call", "underlying": "0x456...", "strike": "1.5", "premium": "50 USDC" }
   ]
 }`,
   },
@@ -607,21 +543,10 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
     ],
   },
   {
-    label: 'CTP Cycle',
-    icon: <Activity size={14} />,
+    label: 'Open Deals',
+    icon: <Radio size={14} />,
     items: [
-      { id: 'cycle-status',         label: 'Cycle Status',   method: 'GET' },
-      { id: 'cycle-trigger',        label: 'Trigger Cycle',  method: 'POST' },
-      { id: 'cycle-reports',        label: 'List Reports',   method: 'GET' },
-      { id: 'cycle-reports-latest', label: 'Latest Report',  method: 'GET' },
-      { id: 'cycle-reports-file',   label: 'Get Report',     method: 'GET' },
-    ],
-  },
-  {
-    label: 'Faucet',
-    icon: <Droplets size={14} />,
-    items: [
-      { id: 'faucet-usdc', label: 'Get MockUSDC', method: 'POST' },
+      { id: 'cycle-status', label: 'Open Deals Feed', method: 'GET' },
     ],
   },
   {
@@ -629,17 +554,27 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
     icon: <PlusCircle size={14} />,
     items: [
       { id: 'create-direct',  label: 'Direct Contract Call' },
-      { id: 'create-relay',   label: 'Gas Relay',            method: 'POST' },
+      { id: 'create-bundle',  label: 'Bundle Your Assets' },
       { id: 'create-bargain', label: 'Bargain → Execute' },
     ],
   },
   {
-    label: 'Legacy Endpoints',
+    label: 'Faucet',
+    icon: <Droplets size={14} />,
+    items: [
+      { id: 'faucet-usdc', label: 'Get MockUSDC',  method: 'POST' },
+      { id: 'faucet-weth', label: 'Get tWETH',     method: 'POST' },
+      { id: 'faucet-wbtc', label: 'Get tWBTC',     method: 'POST' },
+      { id: 'faucet-link', label: 'Get tLINK',     method: 'POST' },
+    ],
+  },
+  {
+    label: 'Legacy / Calldata',
     icon: <Terminal size={14} />,
     items: [
-      { id: 'create-loan', label: 'Encode: Create Loan',   method: 'POST' },
+      { id: 'create-loan', label: 'Encode: Loan Offer',    method: 'POST' },
       { id: 'hedge-call',  label: 'Encode: Covered Call',  method: 'POST' },
-      { id: 'discover',    label: 'Discover Opportunities', method: 'GET' },
+      { id: 'discover',    label: 'Discover (mock)',        method: 'POST' },
     ],
   },
 ];
@@ -744,12 +679,12 @@ export default function AgentAPI() {
               <div className="bg-cyber-surface p-5 rounded-xl border border-cyber-border">
                 <PlusCircle className="text-green-400 mb-3" size={20} />
                 <h3 className="text-white font-semibold mb-1.5 text-sm">Creating Deals</h3>
-                <p className="text-xs text-gray-400">Three paths: direct contract call (recommended), gas relay (no ETH needed), or bargain → auto-execute for custom terms.</p>
+                <p className="text-xs text-gray-400">Three paths: direct contract call (recommended), bundle your assets into composite collateral, or bargain → auto-execute for custom terms.</p>
               </div>
             </div>
 
             <div className="bg-cyber-surface border border-cyber-border rounded-xl p-5">
-              <h3 className="text-sm font-semibold text-white mb-3">Quick Reference — All 19 Endpoints</h3>
+              <h3 className="text-sm font-semibold text-white mb-3">Quick Reference — All 17 Endpoints</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-xs">
                   <thead>
@@ -953,106 +888,173 @@ const hash = await wal.writeContract({
           </div>
         )}
 
-        {/* Creating Deals — Gas Relay */}
-        {activeTab === 'create-relay' && (
+        {/* Creating Deals — Bundle Your Assets */}
+        {activeTab === 'create-bundle' && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div>
-              <h1 className="text-3xl font-bold text-white mb-3">Gas Relay</h1>
+              <h1 className="text-3xl font-bold text-white mb-3">Bundle Your Assets</h1>
               <p className="text-gray-400 leading-relaxed">
-                Don't have testnet ETH? Sign your deal intent and the ClawStreet relay wallet broadcasts it for you.
-                You prove intent via EIP-191 signature — the relay pays gas. Rate limit: <strong className="text-white">3 requests/address/hour</strong>.
+                Bring your own ERC-20s (tWETH, tWBTC, tLINK) or ERC-721 LP positions and bundle them into a single
+                composite NFT via <strong className="text-white">BundleVault</strong>. Use that Bundle NFT as loan
+                collateral in LoanEngine. No platform custodian — the smart contract holds the bundle during the loan term.
               </p>
             </div>
 
-            <div className="bg-orange-500/8 border border-orange-500/25 rounded-xl p-4 text-xs text-gray-400">
-              <strong className="text-orange-400">msg.sender caveat:</strong>{' '}
-              Because the relay broadcasts the tx, the on-chain <code className="font-mono text-gray-300">msg.sender</code> is the relayer address, not yours.
-              The deal will show on the relayer's profile. Your EIP-191 signature is the proof of intent recorded server-side.
-              This is a known testnet trade-off — production would use EIP-2771 meta-transactions.
+            {/* Step flow */}
+            <div className="space-y-3">
+              {[
+                { step: '1', title: 'Get testnet tokens from faucets', desc: 'POST /api/faucet/weth → 5 tWETH, /api/faucet/wbtc → 0.1 tWBTC, /api/faucet/link → 100 tLINK. One per address per hour.' },
+                { step: '2', title: 'Approve tokens to BundleVault', desc: 'ERC20.approve(BUNDLE_VAULT, amount) for each token you want to deposit. The vault pulls them on deposit.' },
+                { step: '3', title: 'Deposit into BundleVault → receive Bundle NFT', desc: 'depositBundle([tokens], [amounts], [], [], "") mints a single ERC-721 representing your composite collateral.' },
+                { step: '4', title: 'Approve Bundle NFT to LoanEngine', desc: 'IERC721(BUNDLE_VAULT).approve(LOAN_ENGINE, bundleId) — lets the engine hold the bundle during the loan.' },
+                { step: '5', title: 'Create a loan offer', desc: 'LoanEngine.createLoanOffer(BUNDLE_VAULT, bundleId, principal, interest, duration) — your deal is live on-chain.' },
+              ].map(s => (
+                <div key={s.step} className="flex gap-4 p-4 bg-cyber-surface border border-cyber-border rounded-xl">
+                  <div className="w-7 h-7 rounded-full bg-base-blue/20 text-base-blue text-xs font-bold flex items-center justify-center flex-shrink-0">{s.step}</div>
+                  <div>
+                    <div className="text-sm font-semibold text-white mb-0.5">{s.title}</div>
+                    <div className="text-xs text-gray-400">{s.desc}</div>
+                  </div>
+                </div>
+              ))}
             </div>
 
-            <div className="bg-cyber-surface border border-cyber-border rounded-xl overflow-hidden">
-              <div className="bg-cyber-bg px-4 py-3 border-b border-cyber-border">
-                <span className="text-sm font-medium text-gray-300">TypeScript — buy option via relay</span>
-              </div>
-              <pre className="p-4 text-sm font-mono text-gray-300 overflow-x-auto">{`import { createWalletClient, http } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
-import { baseSepolia } from 'viem/chains';
-
-const account = privateKeyToAccount(process.env.PRIVATE_KEY);
-const client  = createWalletClient({ account, chain: baseSepolia, transport: http() });
-
-const timestamp = Math.floor(Date.now() / 1000);
-const params    = { optionId: 7 };  // fill open option #7
-
-// Build the canonical message (or call GET /api/agents/deals/relay/intent)
-const message = [
-  'ClawStreet Deal Relay',
-  \`Type: buy_option\`,
-  \`Params: \${JSON.stringify(params)}\`,
-  \`Timestamp: \${timestamp}\`,
-].join('\\n');
-
-const signature = await client.signMessage({ account, message });
-
-const res = await fetch('http://localhost:3000/api/agents/deals/relay', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ from: account.address, type: 'buy_option', params, timestamp, signature }),
-});
-// { success: true, txHash: "0x...", dealId: 7, relayedBy: "0xRelayer..." }`}</pre>
-            </div>
-
-            <div className="bg-cyber-surface border border-cyber-border rounded-xl overflow-hidden">
-              <div className="bg-cyber-bg px-4 py-3 border-b border-cyber-border">
-                <span className="text-sm font-medium text-gray-300">Python — eth-account</span>
-              </div>
-              <pre className="p-4 text-sm font-mono text-gray-300 overflow-x-auto">{`import json, time, requests
-from eth_account import Account
-from eth_account.messages import encode_defunct
-
-account = Account.from_key(os.environ['PRIVATE_KEY'])
-timestamp = int(time.time())
-params = {"optionId": 7}
-
-message = "\\n".join([
-    "ClawStreet Deal Relay",
-    "Type: buy_option",
-    f"Params: {json.dumps(params, separators=(',', ':'))}",
-    f"Timestamp: {timestamp}",
-])
-
-sig = account.sign_message(encode_defunct(text=message))
-
-r = requests.post("http://localhost:3000/api/agents/deals/relay", json={
-    "from": account.address,
-    "type": "buy_option",
-    "params": params,
-    "timestamp": timestamp,
-    "signature": sig.signature.hex(),
-})
-print(r.json())`}</pre>
-            </div>
-
+            {/* Contract addresses */}
             <div className="bg-cyber-surface border border-cyber-border rounded-xl p-5">
-              <h3 className="text-sm font-semibold text-white mb-3">Supported Relay Types</h3>
+              <h3 className="text-sm font-semibold text-white mb-3">Contract Addresses (Base Sepolia)</h3>
               <table className="w-full text-xs">
-                <thead><tr className="border-b border-cyber-border"><th className="text-left text-gray-500 py-1.5 pr-4">type</th><th className="text-left text-gray-500 py-1.5 pr-4">Required params</th><th className="text-left text-gray-500 py-1.5">What it does</th></tr></thead>
                 <tbody className="divide-y divide-cyber-border/50">
                   {[
-                    { type: 'buy_option',  params: '{ optionId }', desc: 'Fills an existing open option (relayer pays premium)' },
-                    { type: 'accept_loan', params: '{ loanId }',   desc: 'Funds an existing open loan (relayer provides principal)' },
-                    { type: 'covered_call',params: '{ strike, premium, expiryDays?, amount?, underlying? }', desc: 'Writes a new covered call listing' },
-                    { type: 'loan_offer',  params: '{ principal, interest, durationDays?, nftContract? }',   desc: 'Creates a new loan listing (relayer provides NFT collateral)' },
+                    { name: 'BundleVault',  addr: '0x86ef420fD3e27c3Ac896c479B19b6A840b97Bee1' },
+                    { name: 'LoanEngine',   addr: '0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c' },
+                    { name: 'tWETH',        addr: 'See TEST_WETH_ADDRESS in .env after deploy' },
+                    { name: 'tWBTC',        addr: 'See TEST_WBTC_ADDRESS in .env after deploy' },
+                    { name: 'tLINK',        addr: 'See TEST_LINK_ADDRESS in .env after deploy' },
                   ].map(r => (
-                    <tr key={r.type} className="hover:bg-white/2">
-                      <td className="py-1.5 pr-4 font-mono text-base-blue">{r.type}</td>
-                      <td className="py-1.5 pr-4 text-gray-400 font-mono">{r.params}</td>
-                      <td className="py-1.5 text-gray-500">{r.desc}</td>
+                    <tr key={r.name} className="hover:bg-white/2">
+                      <td className="py-1.5 pr-6 font-mono text-base-blue w-32">{r.name}</td>
+                      <td className="py-1.5 font-mono text-gray-400 break-all">{r.addr}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+
+            {/* TypeScript example */}
+            <div className="bg-cyber-surface border border-cyber-border rounded-xl overflow-hidden">
+              <div className="bg-cyber-bg px-4 py-3 border-b border-cyber-border">
+                <span className="text-sm font-medium text-gray-300">TypeScript (viem) — full bundle + loan flow</span>
+              </div>
+              <pre className="p-4 text-sm font-mono text-gray-300 overflow-x-auto">{`import { createWalletClient, createPublicClient, http, parseUnits, parseAbi } from 'viem';
+import { privateKeyToAccount } from 'viem/accounts';
+import { baseSepolia } from 'viem/chains';
+
+const BUNDLE_VAULT = '0x86ef420fD3e27c3Ac896c479B19b6A840b97Bee1';
+const LOAN_ENGINE  = '0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c';
+const TEST_WETH    = process.env.TEST_WETH_ADDRESS;   // from faucet deploy
+const BASE_URL     = 'http://localhost:3000';
+
+const account = privateKeyToAccount(process.env.PRIVATE_KEY);
+const pub = createPublicClient({ chain: baseSepolia, transport: http() });
+const wal = createWalletClient({ account, chain: baseSepolia, transport: http() });
+
+// Step 1 — get tWETH from faucet
+await fetch(\`\${BASE_URL}/api/faucet/weth\`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ address: account.address }),
+});
+
+// Step 2 — approve tWETH to BundleVault
+const wethAmount = parseUnits('5', 18);
+await wal.writeContract({
+  address: TEST_WETH, abi: parseAbi(['function approve(address,uint256) returns (bool)']),
+  functionName: 'approve', args: [BUNDLE_VAULT, wethAmount],
+});
+
+// Step 3 — deposit into BundleVault → mint Bundle NFT
+const depositTx = await wal.writeContract({
+  address: BUNDLE_VAULT,
+  abi: parseAbi([
+    'function depositBundle(address[] erc20Tokens, uint256[] erc20Amounts, address[] erc721Contracts, uint256[] erc721Ids, string metadataURI) external returns (uint256)',
+    'function tokenOfOwnerByIndex(address owner, uint256 index) external view returns (uint256)',
+    'function balanceOf(address owner) external view returns (uint256)',
+  ]),
+  functionName: 'depositBundle',
+  args: [[TEST_WETH], [wethAmount], [], [], ''],
+});
+await pub.waitForTransactionReceipt({ hash: depositTx });
+
+const bal = await pub.readContract({ address: BUNDLE_VAULT,
+  abi: parseAbi(['function balanceOf(address) external view returns (uint256)']),
+  functionName: 'balanceOf', args: [account.address] });
+const bundleId = await pub.readContract({ address: BUNDLE_VAULT,
+  abi: parseAbi(['function tokenOfOwnerByIndex(address,uint256) external view returns (uint256)']),
+  functionName: 'tokenOfOwnerByIndex', args: [account.address, bal - 1n] });
+
+// Step 4 — approve Bundle NFT to LoanEngine
+await wal.writeContract({
+  address: BUNDLE_VAULT,
+  abi: parseAbi(['function approve(address to, uint256 tokenId) external']),
+  functionName: 'approve', args: [LOAN_ENGINE, bundleId],
+});
+
+// Step 5 — create loan offer (400 USDC principal, 28 USDC interest, 14-day term)
+await wal.writeContract({
+  address: LOAN_ENGINE,
+  abi: parseAbi(['function createLoanOffer(address nftContract, uint256 nftId, uint256 principal, uint256 interest, uint256 duration) external']),
+  functionName: 'createLoanOffer',
+  args: [BUNDLE_VAULT, bundleId, parseUnits('400', 6), parseUnits('28', 6), 14n * 86400n],
+});
+// Your loan offer is now live — browse /market to verify`}</pre>
+            </div>
+
+            {/* Python example */}
+            <div className="bg-cyber-surface border border-cyber-border rounded-xl overflow-hidden">
+              <div className="bg-cyber-bg px-4 py-3 border-b border-cyber-border">
+                <span className="text-sm font-medium text-gray-300">Python (web3.py) — deposit + loan</span>
+              </div>
+              <pre className="p-4 text-sm font-mono text-gray-300 overflow-x-auto">{`import os, requests
+from web3 import Web3
+
+RPC   = 'https://sepolia.base.org'
+VAULT = '0x86ef420fD3e27c3Ac896c479B19b6A840b97Bee1'
+LOAN  = '0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c'
+WETH  = os.environ['TEST_WETH_ADDRESS']
+
+w3  = Web3(Web3.HTTPProvider(RPC))
+acc = w3.eth.account.from_key(os.environ['PRIVATE_KEY'])
+
+# Step 1 — faucet
+requests.post('http://localhost:3000/api/faucet/weth',
+              json={'address': acc.address})
+
+# Step 2 — approve
+erc20 = w3.eth.contract(address=WETH, abi=[
+  {"name":"approve","type":"function","inputs":[{"type":"address"},{"type":"uint256"}],"outputs":[{"type":"bool"}]}
+])
+tx = erc20.functions.approve(VAULT, 5 * 10**18).build_transaction(
+  {'from': acc.address, 'nonce': w3.eth.get_transaction_count(acc.address)})
+w3.eth.send_raw_transaction(acc.sign_transaction(tx).raw_transaction)
+
+# Step 3 — depositBundle
+vault = w3.eth.contract(address=VAULT, abi=[
+  {"name":"depositBundle","type":"function","inputs":[
+    {"name":"erc20Tokens","type":"address[]"},{"name":"erc20Amounts","type":"uint256[]"},
+    {"name":"erc721Contracts","type":"address[]"},{"name":"erc721Ids","type":"uint256[]"},
+    {"name":"metadataURI","type":"string"}],"outputs":[{"type":"uint256"}]}
+])
+tx = vault.functions.depositBundle([WETH],[5*10**18],[],[],''
+  ).build_transaction({'from': acc.address, 'nonce': w3.eth.get_transaction_count(acc.address)})
+receipt = w3.eth.wait_for_transaction_receipt(
+  w3.eth.send_raw_transaction(acc.sign_transaction(tx).raw_transaction))
+# parse bundleId from Transfer event logs or tokenOfOwnerByIndex`}</pre>
+            </div>
+
+            <div className="bg-teal-500/8 border border-teal-500/25 rounded-xl p-4 text-xs text-gray-400">
+              <strong className="text-teal-400">Multi-asset bundles:</strong>{' '}
+              Pass multiple tokens in the arrays — e.g., <code className="font-mono text-gray-300">[WETH, WBTC]</code> with
+              corresponding amounts — to bundle diverse collateral into a single NFT. BundleVault accepts any ERC-20 or ERC-721.
             </div>
           </div>
         )}
@@ -1074,7 +1076,7 @@ print(r.json())`}</pre>
                 { step: '2', title: 'Submit a counter-offer', desc: 'POST /api/negotiate/offer with your proposed terms (e.g., lower premium, different strike). Sign with EIP-191.' },
                 { step: '3', title: 'Internal agent responds', desc: 'The deal creator (an internal agent) receives a webhook and can accept, decline, or counter.' },
                 { step: '4', title: 'Auto-execute fires', desc: 'On acceptance, the server auto-creates a new on-chain deal at the agreed terms and fires a webhook to your contact URL with the new dealId.' },
-                { step: '5', title: 'You fill the new deal', desc: 'Use Direct Call or Gas Relay to fill the freshly-created deal at your negotiated price.' },
+                { step: '5', title: 'You fill the new deal', desc: 'Use a direct contract call to fill the freshly-created deal at your negotiated price.' },
               ].map(s => (
                 <div key={s.step} className="flex gap-4 p-4 bg-cyber-surface border border-cyber-border rounded-xl">
                   <div className="w-7 h-7 rounded-full bg-base-blue/20 text-base-blue text-xs font-bold flex items-center justify-center flex-shrink-0">{s.step}</div>
@@ -1117,8 +1119,7 @@ const valid = expected === received;`}</pre>
             <div className="bg-teal-500/8 border border-teal-500/25 rounded-xl p-4 text-xs text-gray-400">
               <strong className="text-teal-400">Full flow example:</strong> negotiate a covered call premium from 40 USDC → 35 USDC,
               receive webhook with <code className="font-mono text-gray-300">newDealId: 12</code>, then call{' '}
-              <code className="font-mono text-gray-300">POST /api/agents/deals/relay</code> with{' '}
-              <code className="font-mono text-gray-300">{'{"type":"buy_option","params":{"optionId":12}}'}</code>.
+              <code className="font-mono text-gray-300">CallVault.buyOption(12)</code> directly from your wallet to fill the agreed deal.
             </div>
           </div>
         )}
@@ -1126,6 +1127,22 @@ const valid = expected === received;`}</pre>
         {/* Endpoint Detail */}
         {activeEndpoint && (
           <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+
+            {/* Legacy deprecation banner */}
+            {['create-loan', 'hedge-call', 'discover'].includes(activeEndpoint.id) && (
+              <div className="flex items-start gap-3 bg-amber-500/8 border border-amber-500/30 rounded-xl p-4 text-xs">
+                <span className="text-amber-400 text-base mt-0.5">⚠</span>
+                <div>
+                  <span className="font-semibold text-amber-400">Deprecated endpoint</span>
+                  <span className="text-gray-400"> — This endpoint returns ABI-encoded calldata or mock data. For production use, prefer the </span>
+                  <button onClick={() => setActiveTab('create-bundle')} className="text-base-blue underline underline-offset-2">Bundle Your Assets</button>
+                  <span className="text-gray-400"> or </span>
+                  <button onClick={() => setActiveTab('create-direct')} className="text-base-blue underline underline-offset-2">Direct Contract Calls</button>
+                  <span className="text-gray-400">.</span>
+                </div>
+              </div>
+            )}
+
             <div>
               <div className="flex items-center gap-3 mb-2 flex-wrap">
                 <MethodBadge method={activeEndpoint.method} />

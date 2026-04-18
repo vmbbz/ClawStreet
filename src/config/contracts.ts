@@ -13,11 +13,11 @@ export const CONTRACT_ADDRESSES = {
 };
 
 // ─── Test tokens (deployed by script/DeployTestTokens.s.sol) ─────────────────
-// Fill in addresses after running: forge script script/DeployTestTokens.s.sol --broadcast
+// Deployed 2026-04-18 on Base Sepolia — verified on Basescan
 export const TEST_TOKENS = {
-  WETH: '' as `0x${string}`,  // TestWETH — maps to ETH/USD Pyth feed
-  WBTC: '' as `0x${string}`,  // TestWBTC — maps to BTC/USD Pyth feed
-  LINK: '' as `0x${string}`,  // TestLINK — maps to LINK/USD Pyth feed
+  WETH: '0xE93695aE429a2C156F216Bc615E9Dd8d1A9794dE' as `0x${string}`,  // TestWETH — maps to ETH/USD Pyth feed
+  WBTC: '0xCd1CA9D5612B0Eaefa6388129366226d9715161A' as `0x${string}`,  // TestWBTC — maps to BTC/USD Pyth feed
+  LINK: '0xD14135bcdFE39097122830E1F989cc6e11074B96' as `0x${string}`,  // TestLINK — maps to LINK/USD Pyth feed
 };
 
 // ─── Pyth price feed IDs (same on all networks incl. Base Sepolia) ────────────
