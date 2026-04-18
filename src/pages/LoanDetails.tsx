@@ -124,6 +124,22 @@ export default function LoanDetails() {
     approveRepay({ address: CONTRACT_ADDRESSES.MOCK_USDC, abi: erc20ABI, functionName: 'approve', args: [CONTRACT_ADDRESSES.LOAN_ENGINE, total] } as any);
   };
 
+  // Loading state — data not yet returned
+  if (!loanData && !isError) {
+    return (
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <div className="animate-pulse space-y-4">
+          <div className="h-6 w-32 bg-white/5 rounded" />
+          <div className="h-48 bg-cyber-surface border border-cyber-border rounded-xl" />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="h-32 bg-cyber-surface border border-cyber-border rounded-xl" />
+            <div className="h-32 bg-cyber-surface border border-cyber-border rounded-xl" />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   // Smart fallback: show demo only on actual RPC error, not on "loan not found"
   const isRpcError = isError;
   const isMockData = isRpcError && !loanData;
