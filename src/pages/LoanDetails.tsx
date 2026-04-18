@@ -35,33 +35,37 @@ export default function LoanDetails() {
       setIsLoadingEvents(true);
       try {
         const loanId = BigInt(id);
-        
+
+        // Limit block range to last 9,000 blocks (public RPC cap is 10,000)
+        const latestBlock = await publicClient.getBlockNumber();
+        const fromBlock = latestBlock > 9000n ? latestBlock - 9000n : 0n;
+
         const createdLogs = await publicClient.getLogs({
           address: CONTRACT_ADDRESSES.LOAN_ENGINE,
           event: parseAbiItem('event LoanCreated(uint256 indexed loanId, address indexed borrower, uint256 principal, uint256 health)'),
           args: { loanId },
-          fromBlock: 'earliest'
+          fromBlock,
         });
-        
+
         const acceptedLogs = await publicClient.getLogs({
           address: CONTRACT_ADDRESSES.LOAN_ENGINE,
           event: parseAbiItem('event LoanAccepted(uint256 indexed loanId, address indexed lender)'),
           args: { loanId },
-          fromBlock: 'earliest'
+          fromBlock,
         });
 
         const repaidLogs = await publicClient.getLogs({
           address: CONTRACT_ADDRESSES.LOAN_ENGINE,
           event: parseAbiItem('event LoanRepaid(uint256 indexed loanId)'),
           args: { loanId },
-          fromBlock: 'earliest'
+          fromBlock,
         });
 
         const defaultedLogs = await publicClient.getLogs({
           address: CONTRACT_ADDRESSES.LOAN_ENGINE,
           event: parseAbiItem('event LoanDefaulted(uint256 indexed loanId)'),
           args: { loanId },
-          fromBlock: 'earliest'
+          fromBlock,
         });
 
         const allLogs = [...createdLogs, ...acceptedLogs, ...repaidLogs, ...defaultedLogs];
@@ -124,41 +128,12 @@ export default function LoanDetails() {
     approveRepay({ address: CONTRACT_ADDRESSES.MOCK_USDC, abi: erc20ABI, functionName: 'approve', args: [CONTRACT_ADDRESSES.LOAN_ENGINE, total] } as any);
   };
 
-  // Loading state — data not yet returned
-  if (!loanData && !isError) {
-    return (
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <div className="animate-pulse space-y-4">
-          <div className="h-6 w-32 bg-white/5 rounded" />
-          <div className="h-48 bg-cyber-surface border border-cyber-border rounded-xl" />
-          <div className="grid grid-cols-2 gap-4">
-            <div className="h-32 bg-cyber-surface border border-cyber-border rounded-xl" />
-            <div className="h-32 bg-cyber-surface border border-cyber-border rounded-xl" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // Smart fallback: show demo only on actual RPC error, not on "loan not found"
+  const isLoading = !loanData && !isError;
   const isRpcError = isError;
   const isMockData = isRpcError && !loanData;
 
-  const displayData = isMockData ? {
-    borrower: '0x1234567890abcdef1234567890abcdef12345678',
-    lender: '0xabcdef1234567890abcdef1234567890abcdef12',
-    principal: '1500',
-    interest: '75',
-    duration: 30,
-    startTime: Math.floor(Date.now() / 1000) - 15 * 86400, // 15 days ago
-    health: 85,
-    active: true,
-    repaid: false,
-    nftContract: '0x8f3...2a1',
-    nftId: '42',
-    borrowerReputation: 850,
-    isAgent: true
-  } : {
+  const displayData = loanData ? {
     borrower: loanData[0],
     lender: loanData[1],
     principal: formatUnits(loanData[4], 6),
@@ -173,6 +148,21 @@ export default function LoanDetails() {
     borrowerReputation: 850,
     isAgent: !!getAgentInfo(loanData[0]),
     agentName: getAgentInfo(loanData[0])?.name,
+  } : {
+    // Placeholder — used by isMockData (error) and isLoading paths
+    borrower: '0x1234567890abcdef1234567890abcdef12345678',
+    lender: '0xabcdef1234567890abcdef1234567890abcdef12',
+    principal: '1500',
+    interest: '75',
+    duration: 30,
+    startTime: Math.floor(Date.now() / 1000) - 15 * 86400,
+    health: 85,
+    active: true,
+    repaid: false,
+    nftContract: '0x8f3...2a1',
+    nftId: '42',
+    borrowerReputation: 850,
+    isAgent: true,
   };
 
   const isUnfunded = displayData.lender === '0x0000000000000000000000000000000000000000';
@@ -216,6 +206,22 @@ export default function LoanDetails() {
   }, [displayData.principal]);
 
   const chartData = pythChartData.length > 0 ? pythChartData : fallbackChartData;
+
+  // All hooks declared above — safe to early-return here
+  if (isLoading) {
+    return (
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+        <div className="animate-pulse space-y-4">
+          <div className="h-5 w-28 bg-white/5 rounded" />
+          <div className="h-48 bg-cyber-surface border border-cyber-border rounded-xl" />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="h-32 bg-cyber-surface border border-cyber-border rounded-xl" />
+            <div className="h-32 bg-cyber-surface border border-cyber-border rounded-xl" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
