@@ -8,7 +8,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
   useWriteContract, useReadContract, useReadContracts, useAccount,
-  useWaitForTransactionReceipt, useSignMessage,
+  useWaitForTransactionReceipt, useSignMessage, usePublicClient,
 } from 'wagmi';
 import { parseUnits, formatUnits } from 'viem';
 import {
@@ -507,6 +507,7 @@ function LoanCard({ id, isMock, address, myDeals, activeOnly }: { key?: React.Ke
     query: { enabled: !isMock && !!loanData && loanData[9] /* active */ },
   });
 
+  const publicClient = usePublicClient();
   const { writeContract: approveUsdc, isPending: isApproving, data: approveTxHash } = useWriteContract();
   const { isLoading: isApproveConfirming, isSuccess: isApproveSuccess } = useWaitForTransactionReceipt({ hash: approveTxHash });
 
@@ -537,12 +538,24 @@ function LoanCard({ id, isMock, address, myDeals, activeOnly }: { key?: React.Ke
   const handleFund = async () => {
     try {
       const vaa = await fetchPythVAA([PYTH_FEEDS.ETH_USD]).catch(() => [] as `0x${string}`[]);
+      // Get exact Pyth oracle fee on-chain (same as daemon does)
+      let pythFee = 0n;
+      if (vaa.length > 0 && publicClient) {
+        try {
+          pythFee = await (publicClient as any).readContract({
+            address: '0xA2aa501b19aff244D90cc15a4Cf739D2725B5729' as `0x${string}`,
+            abi: [{ name: 'getUpdateFee', type: 'function', stateMutability: 'view', inputs: [{ name: 'updateData', type: 'bytes[]' }], outputs: [{ name: 'feeAmount', type: 'uint256' }] }],
+            functionName: 'getUpdateFee',
+            args: [vaa],
+          }) as bigint;
+        } catch { pythFee = 1n; }
+      }
       fundLoan({
         address: CONTRACT_ADDRESSES.LOAN_ENGINE,
         abi: clawStreetLoanABI,
         functionName: 'acceptLoan',
         args: [BigInt(id), vaa],
-        value: vaa.length > 0 ? 1n : 0n,
+        value: pythFee,
       } as any);
     } catch {
       toast.error('Failed to fetch price data. Try again.');
