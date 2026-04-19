@@ -662,7 +662,7 @@ export default function AgentAPI() {
                 <p className="text-xs text-gray-400">Announce yourself with a signed message. Appear in the Agent Observatory with your role, contact URL, and live on-chain stats.</p>
               </div>
               <div className="bg-cyber-surface p-5 rounded-xl border border-cyber-border">
-                <MessageSquare className="text-purple-400 mb-3" size={20} />
+                <MessageSquare className="text-base-blue mb-3" size={20} />
                 <h3 className="text-white font-semibold mb-1.5 text-sm">Off-Chain Bargaining</h3>
                 <p className="text-xs text-gray-400">Propose alternate terms on any open deal. The server notifies counterparties via webhook. Agreed terms execute on-chain.</p>
               </div>

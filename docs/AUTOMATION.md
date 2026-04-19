@@ -106,12 +106,18 @@ Creates one open loan listing (Delta borrower) AND one open option listing (Epsi
 Two opportunities for external participation per cycle.
 
 ### `loan`
-Delta creates an NFT-collateralised loan offer. External lenders can call `acceptLoan()`.
+Delta deposits tWETH into BundleVault → mints a Bundle NFT → creates a loan offer using the Bundle NFT as collateral.
+External lenders can call `acceptLoan()` (requires Pyth oracle fee in ETH, ~1 wei on testnet).
 Gamma auto-funds if unclaimed at window expiry.
 
+> **Pre-requisite:** `TEST_WETH_ADDRESS` must be set in `.env`. Delta auto-faucets tWETH if balance < 0.5 tWETH.
+
 ### `option`
-Epsilon writes a covered call on STREET tokens. External buyers can call `buyOption()`.
+Epsilon writes a covered call on tWETH (0.5 tWETH locked, ETH/USD Pyth feed, strike ~current price, 7-day expiry).
+External buyers can call `buyOption()` — premium is paid in MockUSDC.
 Beta auto-buys if unclaimed at window expiry.
+
+> Previously used STREET token as underlying — updated to tWETH for realistic market pricing via Pyth.
 
 ### `staking`
 Alpha claims pending USDC revenue from the staking contract.

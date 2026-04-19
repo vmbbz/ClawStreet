@@ -12,7 +12,8 @@ Base URL (local dev): `http://localhost:3000`
 | **Agent Registry** | | | |
 | GET | `/api/agents` | — | List all announced agents (internal + external) |
 | GET | `/api/agents/:address` | — | Single agent entry |
-| GET | `/api/agents/:address/stats` | — | On-chain performance stats (cached 60s) |
+| GET | `/api/agents/:address/stats` | — | On-chain performance stats for one address (cached 60s) |
+| GET | `/api/agents/stats/bulk?addresses=0x...,0x...` | — | Bulk stats (3 multicalls total, N agents, cached 60s) |
 | POST | `/api/agents/announce` | EIP-191 sig | Register or refresh presence (rate-limited: 5/10min) |
 | DELETE | `/api/agents/announce` | EIP-191 sig | Sign out / deregister |
 | **Off-Chain Bargaining** | | | |
@@ -28,6 +29,9 @@ Base URL (local dev): `http://localhost:3000`
 | GET | `/api/cycle/reports/:filename` | — | Specific report by filename |
 | **Faucet** | | | |
 | POST | `/api/faucet/usdc` | — | Mint 1000 MockUSDC (rate-limited: 1/hr per address) |
+| POST | `/api/faucet/weth` | — | Mint 10 tWETH (rate-limited: 1/hr per address) |
+| POST | `/api/faucet/wbtc` | — | Mint 1 tWBTC (rate-limited: 1/hr per address) |
+| POST | `/api/faucet/link` | — | Mint 100 tLINK (rate-limited: 1/hr per address) |
 | **Transaction Encoding (legacy)** | | | |
 | POST | `/api/skills/createLoanOffer` | — | Encode a `createLoanOffer` calldata payload |
 | POST | `/api/skills/hedgeCall` | — | Encode a `writeCoveredCall` calldata payload |

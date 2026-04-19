@@ -84,6 +84,16 @@ PYTH_ETH_USD_FEED_ID=0xff61491a931112ddf1bd8147cd1b641375f79f5825126d66548087463
 > `CALL_VAULT_ADDRESS`, `BUNDLE_VAULT_ADDRESS`, `MOCK_NFT_ADDRESS`, `MOCK_USDC_ADDRESS`,
 > `AGENT1_ADDRESS` through `AGENT5_ADDRESS`
 
+> **TestTokens** (tWETH, tWBTC, tLINK) are deployed separately — see Step 0 below.
+> Add these after deploying:
+> ```bash
+> TEST_WETH_ADDRESS=0x<deployed>
+> TEST_WBTC_ADDRESS=0x<deployed>
+> TEST_LINK_ADDRESS=0x<deployed>
+> # Browser-side (Vite) — needed for faucet UI
+> VITE_BASE_SEPOLIA_RPC=https://base-sepolia.g.alchemy.com/v2/YOUR_KEY
+> ```
+
 ---
 
 ## 3. Agent Wallet Setup
@@ -237,6 +247,9 @@ forge script script/DisperseUSDC.s.sol \
 | ClawStreetBundleVault | `0x86ef420fD3e27c3Ac896c479B19b6A840b97Bee1` | [View ↗](https://sepolia.basescan.org/address/0x86ef420fD3e27c3Ac896c479B19b6A840b97Bee1) |
 | ClawStreetLoan | `0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c` | [View ↗](https://sepolia.basescan.org/address/0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c) |
 | ClawStreetCallVault | `0x69730728a0B19b844bc18888d2317987Bc528baE` | [View ↗](https://sepolia.basescan.org/address/0x69730728a0B19b844bc18888d2317987Bc528baE) |
+| TestWETH (tWETH) | `0xE93695aE429a2C156F216Bc615E9Dd8d1A9794dE` | [View ↗](https://sepolia.basescan.org/address/0xE93695aE429a2C156F216Bc615E9Dd8d1A9794dE) |
+| TestWBTC (tWBTC) | `0xCd1CA9D5612B0Eaefa6388129366226d9715161A` | [View ↗](https://sepolia.basescan.org/address/0xCd1CA9D5612B0Eaefa6388129366226d9715161A) |
+| TestLINK (tLINK) | `0xD14135bcdFE39097122830E1F989cc6e11074B96` | [View ↗](https://sepolia.basescan.org/address/0xD14135bcdFE39097122830E1F989cc6e11074B96) |
 
 **Agent wallets (seeded 2026-04-17):**
 
@@ -409,9 +422,10 @@ Base Sepolia faucet limit: **0.5 ETH/day**. The seed script spends ~0.0005 ETH t
 | `ClawStreetCallVault.t.sol` | 59 | Unit |
 | `ClawStreetCallVault.edge.t.sol` | 9 | Edge + fuzz |
 | `ClawStreetBundleVault.t.sol` | 13 | Unit |
+| `ClawStreetBundleVaultLoan.t.sol` | 6 | Integration: BundleVault → LoanEngine |
 | `test/invariants/StakingInvariant.t.sol` | 7 | Stateful invariant |
 | `test/invariants/CallVaultInvariant.t.sol` | 6 | Stateful invariant |
-| **Total** | **284** | |
+| **Total** | **290** | |
 
 ---
 

@@ -3,8 +3,8 @@
 **Protocol:** ClawStreet DeFi Infrastructure
 **Network:** Base Sepolia (testnet)
 **Framework:** Foundry (forge)
-**Test suite:** 284 tests across 10 files (271 unit/fuzz + 13 stateful invariants)
-**Coverage:** ClawToken, Staking, Loan Engine, Call Vault, Bundle Vault
+**Test suite:** 290 tests across 11 files (277 unit/fuzz + 13 stateful invariants)
+**Coverage:** ClawToken, Staking, Loan Engine, Call Vault, Bundle Vault, BundleVault→LoanEngine integration
 
 ---
 
@@ -22,7 +22,8 @@
 | `test/ClawStreetBundleVault.t.sol` | 13 | Unit |
 | `test/invariants/StakingInvariant.t.sol` | 7 | Stateful invariant (128k calls each) |
 | `test/invariants/CallVaultInvariant.t.sol` | 6 | Stateful invariant (128k calls each) |
-| **Total** | **284** | |
+| `test/ClawStreetBundleVaultLoan.t.sol` | 6 | Integration: BundleVault → LoanEngine end-to-end |
+| **Total** | **290** | |
 
 ---
 

@@ -47,7 +47,7 @@ const SUITES: TestSuite[] = [
   {
     contract: 'ClawToken ($STREET)',
     file: 'test/ClawToken.t.sol',
-    color: 'purple',
+    color: 'lobster',
     tests: [
       { name: 'test_maxSupply_constant', label: 'Max supply constant is 100M', proves: '100M hard cap is enforced at the constant level', category: 'Happy Path', gas: 5482 },
       { name: 'test_initialSupply_isZero', label: 'Initial supply starts at zero', proves: 'No pre-minted supply at deploy', category: 'Happy Path', gas: 5510 },
@@ -203,12 +203,12 @@ const SUITES: TestSuite[] = [
 const CATEGORY_COLORS: Record<Category, string> = {
   'Happy Path': 'bg-green-500/15 text-green-400 border-green-500/20',
   'Edge Case':  'bg-orange-500/15 text-orange-400 border-orange-500/20',
-  'Fuzz':       'bg-purple-500/15 text-purple-400 border-purple-500/20',
+  'Fuzz':       'bg-lobster-orange/15 text-lobster-orange border-lobster-orange/20',
   'Invariant':  'bg-yellow-500/15 text-yellow-400 border-yellow-500/20',
 };
 
 const SUITE_ACCENT: Record<string, string> = {
-  purple: 'border-purple-500/30 bg-purple-500/5',
+  lobster: 'border-lobster-orange/30 bg-lobster-orange/5',
   blue:   'border-blue-500/30 bg-blue-500/5',
   green:  'border-green-500/30 bg-green-500/5',
   orange: 'border-orange-500/30 bg-orange-500/5',
@@ -277,7 +277,7 @@ function OverviewMode() {
         {[
           { label: 'Total Tests', value: totals.total, color: 'text-white', bg: 'bg-base-blue/5 border-base-blue/30' },
           { label: 'Unit / Integration', value: totals.unit, color: 'text-green-400', bg: 'bg-green-500/5 border-green-500/20' },
-          { label: 'Fuzz Tests', value: totals.fuzz, color: 'text-purple-400', bg: 'bg-purple-500/5 border-purple-500/20' },
+          { label: 'Fuzz Tests', value: totals.fuzz, color: 'text-lobster-orange', bg: 'bg-lobster-orange/5 border-lobster-orange/20' },
           { label: 'Stateful Invariants', value: totals.invariant, color: 'text-yellow-400', bg: 'bg-yellow-500/5 border-yellow-500/20' },
         ].map(({ label, value, color, bg }) => (
           <div key={label} className={`rounded-xl border p-4 ${bg}`}>
@@ -306,7 +306,7 @@ function OverviewMode() {
               <span className="text-lg font-bold">13</span> tests × 128k calls
             </div>
             <div className="text-gray-600 text-xs">▲</div>
-            <div className="bg-purple-500/15 border border-purple-500/30 rounded-lg px-6 py-2 w-64 text-xs text-purple-400 font-medium">
+            <div className="bg-lobster-orange/15 border border-lobster-orange/30 rounded-lg px-6 py-2 w-64 text-xs text-lobster-orange font-medium">
               Fuzz Tests<br />
               <span className="text-lg font-bold">{totals.fuzz}</span> × 256 runs each
             </div>
@@ -915,7 +915,7 @@ const STATE_COLORS: Record<RunnerState, string> = {
   planning:    'bg-blue-500/20 text-blue-400 border-blue-500/30',
   executing:   'bg-base-blue/20 text-base-blue border-base-blue/30',
   open_window: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-  monitoring:  'bg-purple-500/20 text-purple-400 border-purple-500/30',
+  monitoring:  'bg-lobster-orange/20 text-lobster-orange border-lobster-orange/30',
   settling:    'bg-orange-500/20 text-orange-400 border-orange-500/30',
   reporting:   'bg-green-500/20 text-green-400 border-green-500/30',
 };
@@ -1214,7 +1214,7 @@ function AutomationMode() {
                           {(expandedReportData as FullReport).deals.map((deal, i) => (
                             <div key={i} className="bg-black/20 rounded-lg p-3 border border-cyber-border/30">
                               <div className="flex items-center gap-2 mb-2">
-                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase ${deal.type === 'loan' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-purple-500/10 text-purple-400 border-purple-500/20'}`}>{deal.type}</span>
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase ${deal.type === 'loan' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-claw-pink/10 text-claw-pink border-claw-pink/20'}`}>{deal.type}</span>
                                 <span className="text-xs text-white">#{deal.id}</span>
                                 <span className={`text-[10px] px-1.5 py-0.5 rounded border ${deal.organicParticipation ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' : 'bg-gray-500/10 text-gray-400 border-gray-500/20'}`}>
                                   {deal.organicParticipation ? 'ORGANIC' : 'AUTO'}

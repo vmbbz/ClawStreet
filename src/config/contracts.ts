@@ -44,6 +44,28 @@ if (TEST_TOKENS.WETH) registerTokenFeed(TEST_TOKENS.WETH, PYTH_FEEDS.ETH_USD);
 if (TEST_TOKENS.WBTC) registerTokenFeed(TEST_TOKENS.WBTC, PYTH_FEEDS.BTC_USD);
 if (TEST_TOKENS.LINK) registerTokenFeed(TEST_TOKENS.LINK, PYTH_FEEDS.LINK_USD);
 
+// ─── Token metadata (symbol + icon via Trust Wallet Assets CDN) ───────────────
+// Maps testnet address → canonical mainnet address for icon lookup
+interface TokenMeta { symbol: string; canonical: string }
+const TOKEN_METADATA: Record<string, TokenMeta> = {
+  [TEST_TOKENS.WETH.toLowerCase()]: { symbol: 'WETH', canonical: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2' },
+  [TEST_TOKENS.WBTC.toLowerCase()]: { symbol: 'WBTC', canonical: '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599' },
+  [TEST_TOKENS.LINK.toLowerCase()]: { symbol: 'LINK', canonical: '0x514910771AF9Ca656af840dff83E8264EcF986CA' },
+};
+
+/** Returns the human-readable symbol for a known testnet token, else a truncated address. */
+export function getTokenSymbol(address: string): string {
+  return TOKEN_METADATA[address.toLowerCase()]?.symbol
+    ?? `${address.slice(0, 6)}…${address.slice(-4)}`;
+}
+
+/** Returns a token icon URL from Trust Wallet Assets CDN (10k+ tokens). Falls back gracefully. */
+export function getTokenIconUrl(address: string): string {
+  const canonical = TOKEN_METADATA[address.toLowerCase()]?.canonical ?? address;
+  // Checksum not required — Trust Wallet Assets CDN handles case-insensitive lookup
+  return `https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/${canonical}/logo.png`;
+}
+
 // ─── Known agent registry ─────────────────────────────────────────────────────
 // Used by Profile.tsx to distinguish agents from human users
 export type AgentInfo = {

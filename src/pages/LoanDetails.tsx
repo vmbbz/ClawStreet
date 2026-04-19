@@ -351,8 +351,8 @@ export default function LoanDetails() {
 
                     <div className="flex justify-between items-center bg-cyber-surface p-2 rounded border border-cyber-border/50">
                       <div className="flex items-center">
-                        <div className="w-6 h-6 rounded bg-purple-500/20 flex items-center justify-center mr-2">
-                          <span className="text-purple-400 font-bold text-[10px]">SS</span>
+                        <div className="w-6 h-6 rounded bg-neon-blue/10 flex items-center justify-center mr-2">
+                          <span className="text-neon-blue font-bold text-[10px]">SS</span>
                         </div>
                         <span className="text-xs text-gray-300">ScoutScore.ai</span>
                       </div>
@@ -493,7 +493,7 @@ export default function LoanDetails() {
                   <div key={idx} className="relative pl-6">
                     <div className={`absolute -left-1.5 top-1 w-3 h-3 rounded-full ring-4 ring-cyber-surface ${
                       event.eventName === 'LoanCreated' ? 'bg-base-blue' :
-                      event.eventName === 'LoanAccepted' ? 'bg-purple-500' :
+                      event.eventName === 'LoanAccepted' ? 'bg-green-400' :
                       event.eventName === 'LoanRepaid' ? 'bg-green-500' : 'bg-red-500'
                     }`} />
                     <div className="flex justify-between items-start mb-1">

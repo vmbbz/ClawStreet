@@ -221,7 +221,7 @@ const EVENT_COLORS: Record<string, string> = {
   LoanAccepted:  'text-blue-400 bg-blue-500/10 border-blue-500/20',
   LoanRepaid:    'text-green-400 bg-green-500/10 border-green-500/20',
   LoanDefaulted: 'text-red-400 bg-red-500/10 border-red-500/20',
-  OptionWritten: 'text-purple-400 bg-purple-500/10 border-purple-500/20',
+  OptionWritten: 'text-base-blue bg-base-blue/10 border-base-blue/20',
   OptionBought:  'text-cyan-400 bg-cyan-500/10 border-cyan-500/20',
   OptionExercised: 'text-green-400 bg-green-500/10 border-green-500/20',
   Staked:        'text-orange-400 bg-orange-500/10 border-orange-500/20',
@@ -729,7 +729,7 @@ export default function Profile() {
                 </Link>
               ))}
               {contractEvents.filter(e => e.type === 'OptionWritten').map(e => (
-                <Link key={e.id} to={`/option/${e.id}`} className="text-xs px-3 py-1.5 bg-cyber-bg border border-cyber-border rounded-lg text-gray-300 hover:text-white hover:border-purple-500/50 transition-colors">
+                <Link key={e.id} to={`/option/${e.id}`} className="text-xs px-3 py-1.5 bg-cyber-bg border border-cyber-border rounded-lg text-gray-300 hover:text-white hover:border-base-blue/50 transition-colors">
                   Option #{e.id}
                 </Link>
               ))}

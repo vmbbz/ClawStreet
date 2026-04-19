@@ -357,7 +357,7 @@ export default function Market() {
                 onClick={() => { setIsWriteCallOpen(true); setCreateMenuOpen(false); }}
                 className="w-full text-left px-4 py-3 text-sm text-gray-300 hover:text-white hover:bg-white/5 rounded-b-xl flex items-center gap-2 transition-colors"
               >
-                <TrendingUp size={14} className="text-purple-400" />
+                <TrendingUp size={14} className="text-lobster-orange" />
                 Covered Call
               </button>
             </div>
@@ -861,7 +861,7 @@ function OptionCard({ id, isMock, address, myDeals, activeOnly }: { key?: React.
   const statusColor = displayData.exercised ? 'bg-gray-500/20 text-gray-400 border-gray-500/30'
     : displayData.isExpired ? 'bg-red-500/20 text-red-400 border-red-500/30'
     : isAvailable ? 'bg-green-500/20 text-green-400 border-green-500/30'
-    : 'bg-purple-500/20 text-purple-400 border-purple-500/30';
+    : 'bg-claw-pink/15 text-claw-pink border-claw-pink/30';
 
   return (
     <motion.div
@@ -872,13 +872,13 @@ function OptionCard({ id, isMock, address, myDeals, activeOnly }: { key?: React.
           ? 'border-cyber-border/40 opacity-60'
           : displayData.expiringSoon
           ? 'border-red-500/50 hover:border-red-500/70 shadow-[0_0_12px_rgba(239,68,68,0.15)] animate-pulse-border'
-          : 'border-cyber-border hover:border-purple-500/30'
+          : 'border-cyber-border hover:border-claw-pink/30'
       }`}
     >
       <div className="h-20 bg-cyber-bg relative flex items-center justify-center border-b border-cyber-border">
         <TrendingUp className="text-gray-500 w-7 h-7" />
         <div className="absolute top-2 left-3 flex items-center gap-1.5">
-          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-purple-500/20 text-purple-400 border border-purple-500/30 uppercase tracking-wider">
+          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-claw-pink/15 text-claw-pink border border-claw-pink/30 uppercase tracking-wider">
             CALL OPTION
           </span>
           {/* TEST CYCLE badge — shown when a known agent wrote an available (unbuilt) option */}
@@ -926,7 +926,7 @@ function OptionCard({ id, isMock, address, myDeals, activeOnly }: { key?: React.
         <div className="flex items-end justify-between mt-auto">
           <div>
             <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-0.5">Premium</p>
-            <p className={`font-bold text-lg ${displayData.exercised ? 'text-gray-500' : 'text-purple-400'}`}>{displayData.premium} USDC</p>
+            <p className={`font-bold text-lg ${displayData.exercised ? 'text-gray-500' : 'text-base-blue'}`}>{displayData.premium} USDC</p>
           </div>
           <div className="flex gap-2">
             <Link to={`/option/${id}`} className="px-3 py-2 bg-cyber-bg text-white border border-cyber-border rounded-lg font-semibold text-xs hover:bg-cyber-surface transition-colors">
@@ -941,7 +941,7 @@ function OptionCard({ id, isMock, address, myDeals, activeOnly }: { key?: React.
                   <button
                     onClick={() => setIsBargainOpen(true)}
                     title="Propose different premium"
-                    className="px-2.5 py-2 bg-cyber-bg border border-cyber-border text-gray-500 hover:text-purple-400 hover:border-purple-500/40 rounded-lg text-xs transition-colors"
+                    className="px-2.5 py-2 bg-cyber-bg border border-cyber-border text-gray-500 hover:text-claw-pink hover:border-claw-pink/40 rounded-lg text-xs transition-colors"
                   >
                     <MessageSquare size={13} />
                   </button>
@@ -971,7 +971,7 @@ function OptionCard({ id, isMock, address, myDeals, activeOnly }: { key?: React.
             <p className="text-sm text-gray-400">Buy a call option for <strong className="text-white">{displayData.amount} {displayData.underlying}</strong> at strike <strong className="text-white">${displayData.strike}</strong>, expires in {displayData.expiryDays} days.</p>
             <div className="p-4 bg-cyber-bg rounded-lg border border-cyber-border flex justify-between items-center">
               <span className="text-sm text-gray-400">Premium Cost</span>
-              <span className="text-lg font-bold text-purple-400">{displayData.premium} USDC</span>
+              <span className="text-lg font-bold text-base-blue">{displayData.premium} USDC</span>
             </div>
             {isBuySuccess && <div className="p-3 bg-green-500/20 border border-green-500/50 rounded-lg text-green-400 text-sm">Purchased! Tx: {buyTxHash?.slice(0, 10)}...</div>}
             {buyError && <div className="p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-400 text-xs break-all">{(buyError as Error).message?.split('\n')[0]}</div>}

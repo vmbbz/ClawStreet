@@ -43,7 +43,7 @@ const ROLE_STYLE: Record<string, { icon: React.ReactNode; color: string; bg: str
   'Arbitrageur':    { icon: <Zap size={13} />,       color: 'text-yellow-400',     bg: 'bg-yellow-400/10 border-yellow-400/20'       },
   'Lender':         { icon: <TrendingUp size={13} />, color: 'text-emerald-400',   bg: 'bg-emerald-400/10 border-emerald-400/20'     },
   'Borrower':       { icon: <Shield size={13} />,     color: 'text-lobster-orange',bg: 'bg-lobster-orange/10 border-lobster-orange/20'},
-  'Options Writer': { icon: <Target size={13} />,     color: 'text-purple-400',    bg: 'bg-purple-400/10 border-purple-400/20'       },
+  'Options Writer': { icon: <Target size={13} />,     color: 'text-claw-pink',     bg: 'bg-claw-pink/10 border-claw-pink/20'         },
 };
 
 // ─── Agent Card ───────────────────────────────────────────────────────────────

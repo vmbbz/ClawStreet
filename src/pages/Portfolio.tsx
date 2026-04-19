@@ -473,11 +473,11 @@ function WrittenOptionItem({ id, isMock }: { key?: React.Key; id: number; isMock
   const hasBuyer = displayData.buyer !== '0x0000000000000000000000000000000000000000';
 
   return (
-    <div className="bg-cyber-surface p-4 rounded-xl border border-cyber-border hover:border-purple-500/30 transition-colors">
+    <div className="bg-cyber-surface p-4 rounded-xl border border-cyber-border hover:border-claw-pink/30 transition-colors">
       <div className="flex items-center justify-between">
         <div>
-          <Link to={`/option/${id}`} className="font-semibold text-white text-sm hover:text-purple-400 transition-colors flex items-center gap-1.5">
-            <Target size={12} className="text-purple-400" />
+          <Link to={`/option/${id}`} className="font-semibold text-white text-sm hover:text-claw-pink transition-colors flex items-center gap-1.5">
+            <Target size={12} className="text-claw-pink" />
             Call Option #{id}
           </Link>
           <p className="text-xs text-gray-400 mt-1">{displayData.amount} tokens @ ${displayData.strike} strike</p>
@@ -485,7 +485,7 @@ function WrittenOptionItem({ id, isMock }: { key?: React.Key; id: number; isMock
             {displayData.exercised
               ? <span className="text-gray-500">Exercised</span>
               : hasBuyer
-              ? <span className="text-purple-400">Sold — Premium: ${displayData.premium}</span>
+              ? <span className="text-claw-pink">Sold — Premium: ${displayData.premium}</span>
               : <span className="text-yellow-400">Open — Premium: ${displayData.premium}</span>
             }
           </p>
@@ -541,11 +541,11 @@ function BoughtOptionItem({ id, isMock }: { key?: React.Key; id: number; isMock:
   const isExpired = Math.floor(Date.now() / 1000) > displayData.expiry;
 
   return (
-    <div className="bg-cyber-surface p-4 rounded-xl border border-cyber-border hover:border-purple-500/30 transition-colors">
+    <div className="bg-cyber-surface p-4 rounded-xl border border-cyber-border hover:border-claw-pink/30 transition-colors">
       <div className="flex items-center justify-between">
         <div>
-          <Link to={`/option/${id}`} className="font-semibold text-white text-sm hover:text-purple-400 transition-colors flex items-center gap-1.5">
-            <Target size={12} className="text-purple-400" />
+          <Link to={`/option/${id}`} className="font-semibold text-white text-sm hover:text-claw-pink transition-colors flex items-center gap-1.5">
+            <Target size={12} className="text-claw-pink" />
             Call Option #{id}
           </Link>
           <p className="text-xs text-gray-400 mt-1">{displayData.amount} tokens @ ${displayData.strike}</p>
@@ -554,7 +554,7 @@ function BoughtOptionItem({ id, isMock }: { key?: React.Key; id: number; isMock:
               ? <span className="text-green-400">Exercised</span>
               : isExpired
               ? <span className="text-gray-500">Expired</span>
-              : <span className="text-purple-400">Active</span>
+              : <span className="text-claw-pink">Active</span>
             }
           </p>
         </div>
@@ -567,7 +567,7 @@ function BoughtOptionItem({ id, isMock }: { key?: React.Key; id: number; isMock:
               args: [BigInt(id)],
             } as any)}
             disabled={isExercising || isExerciseConfirming || isExerciseSuccess}
-            className="px-3 py-1.5 text-xs bg-purple-500/20 text-purple-400 border border-purple-500/30 rounded-lg hover:bg-purple-500/30 transition-colors disabled:opacity-50"
+            className="px-3 py-1.5 text-xs bg-claw-pink/15 text-claw-pink border border-claw-pink/30 rounded-lg hover:bg-claw-pink/25 transition-colors disabled:opacity-50"
           >
             {isExercising || isExerciseConfirming ? 'Exercising...' : isExerciseSuccess ? 'Done' : 'Exercise'}
           </button>

@@ -7,6 +7,8 @@
   --color-lobster-orange: #ff5a00;
   --color-lobster-dark: #cc4800;
   --color-neon-blue: #64ffda;
+  --color-claw-pink: #d14266;
+  --color-claw-dark: #b03558;
 
   /* Dark theme defaults — overridden by [data-theme="light"] below */
   --color-cyber-bg:      #030712;
@@ -68,4 +70,26 @@ body {
 [data-theme="light"] footer {
   background-color: #f1f5f9 !important;
   border-color: #e2e8f0 !important;
+}
+
+/* ─── RainbowKit light mode overrides ──────────────────────────────────────── */
+/* Applied when dynamic lightTheme isn't in effect (belt + suspenders) */
+[data-theme="light"] [data-rk] {
+  --rk-colors-modalBackground: #ffffff;
+  --rk-colors-modalText: #0f172a;
+  --rk-colors-modalTextDim: #475569;
+  --rk-colors-modalTextSecondary: #64748b;
+  --rk-colors-modalBorder: #e2e8f0;
+  --rk-colors-connectButtonBackground: #f8fafc;
+  --rk-colors-connectButtonText: #0f172a;
+  --rk-colors-connectButtonInnerBackground: #f1f5f9;
+  --rk-colors-menuItemBackground: #f1f5f9;
+  --rk-colors-generalBorder: #e2e8f0;
+  --rk-colors-generalBorderDim: #f8fafc;
+  --rk-colors-actionButtonBorder: #e2e8f0;
+  --rk-colors-actionButtonSecondaryBackground: #f1f5f9;
+  --rk-colors-closeButton: #64748b;
+  --rk-colors-closeButtonBackground: #f1f5f9;
+  --rk-colors-profileAction: #0f172a;
+  --rk-colors-profileActionHover: #f1f5f9;
 }

@@ -119,8 +119,8 @@ export default function Landing() {
               <span className="text-gray-300 font-semibold">Cred Protocol</span>
             </div>
             <div className="flex items-center space-x-2">
-              <div className="w-8 h-8 rounded bg-purple-500/20 flex items-center justify-center border border-purple-500/30">
-                <span className="text-purple-400 font-bold text-xs">SS</span>
+              <div className="w-8 h-8 rounded bg-neon-blue/10 flex items-center justify-center border border-neon-blue/20">
+                <span className="text-neon-blue font-bold text-xs">SS</span>
               </div>
               <span className="text-gray-300 font-semibold">ScoutScore.ai</span>
             </div>
