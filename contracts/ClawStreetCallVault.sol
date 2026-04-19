@@ -32,11 +32,33 @@ contract ClawStreetCallVault is
     uint256 public optionCounter;
     IERC20 public premiumToken; // e.g. USDC
 
+    // ── Bundle covered calls ──────────────────────────────────────────────────
+    struct BundleCallOption {
+        address writer;
+        address buyer;
+        address bundleVault;
+        uint256 bundleId;
+        uint256 strike;   // total USDC cost to exercise (premiumToken units)
+        uint256 expiry;
+        uint256 premium;
+        bool exercised;
+        bool active;
+    }
+
+    mapping(uint256 => BundleCallOption) public bundleOptions;
+    uint256 public bundleOptionCounter;
+
     event OptionWritten(uint256 indexed optionId, address indexed writer, uint256 amount, uint256 strike, uint256 premium);
     event OptionBought(uint256 indexed optionId, address indexed buyer);
     event OptionExercised(uint256 indexed optionId, address indexed buyer);
     event OptionCancelled(uint256 indexed optionId);
     event UnderlyingReclaimed(uint256 indexed optionId);
+
+    event BundleOptionWritten(uint256 indexed bundleOptId, address indexed writer, address bundleVault, uint256 bundleId, uint256 strike, uint256 premium);
+    event BundleOptionBought(uint256 indexed bundleOptId, address indexed buyer);
+    event BundleOptionExercised(uint256 indexed bundleOptId, address indexed buyer);
+    event BundleOptionCancelled(uint256 indexed bundleOptId);
+    event BundleReclaimed(uint256 indexed bundleOptId);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -138,6 +160,94 @@ contract ClawStreetCallVault is
 
         option.active = false;
         emit UnderlyingReclaimed(optionId);
+    }
+
+    // ── Bundle covered call functions ─────────────────────────────────────────
+
+    /// @notice Write a covered call using a Bundle NFT as underlying.
+    ///         Writer must approve this contract to transfer their Bundle NFT first.
+    ///         On exercise, buyer pays strike USDC and receives the Bundle NFT intact;
+    ///         they can then call withdrawBundle() on the vault to unwrap individual assets.
+    function writeBundleCall(
+        address _bundleVault,
+        uint256 bundleId,
+        uint256 strike,
+        uint256 expiry,
+        uint256 premium
+    ) external nonReentrant returns (uint256) {
+        require(_bundleVault != address(0), "Invalid bundle vault");
+        require(expiry > block.timestamp, "Expiry in past");
+        require(strike > 0 && premium > 0, "Strike/premium must be > 0");
+
+        IERC721(_bundleVault).transferFrom(msg.sender, address(this), bundleId);
+
+        uint256 bundleOptId = bundleOptionCounter++;
+        bundleOptions[bundleOptId] = BundleCallOption({
+            writer: msg.sender,
+            buyer: address(0),
+            bundleVault: _bundleVault,
+            bundleId: bundleId,
+            strike: strike,
+            expiry: expiry,
+            premium: premium,
+            exercised: false,
+            active: true
+        });
+
+        emit BundleOptionWritten(bundleOptId, msg.sender, _bundleVault, bundleId, strike, premium);
+        return bundleOptId;
+    }
+
+    /// @notice Buy a bundle option. Pays premium to writer immediately.
+    function buyBundleOption(uint256 bundleOptId) external nonReentrant {
+        BundleCallOption storage opt = bundleOptions[bundleOptId];
+        require(opt.active && opt.buyer == address(0), "Not available");
+        require(block.timestamp < opt.expiry, "Expired");
+
+        require(premiumToken.transferFrom(msg.sender, opt.writer, opt.premium), "Premium transfer failed");
+
+        opt.buyer = msg.sender;
+        emit BundleOptionBought(bundleOptId, msg.sender);
+    }
+
+    /// @notice Exercise a bundle option. Buyer pays strike USDC to writer and receives the Bundle NFT.
+    ///         Requires pre-approval of `strike` USDC to this contract.
+    ///         Buyer can call withdrawBundle() on the BundleVault to receive underlying assets.
+    function exerciseBundleOption(uint256 bundleOptId) external nonReentrant {
+        BundleCallOption storage opt = bundleOptions[bundleOptId];
+        require(opt.buyer == msg.sender, "Not buyer");
+        require(!opt.exercised, "Already exercised");
+        require(block.timestamp < opt.expiry, "Expired");
+
+        require(premiumToken.transferFrom(msg.sender, opt.writer, opt.strike), "Strike transfer failed");
+        IERC721(opt.bundleVault).transferFrom(address(this), msg.sender, opt.bundleId);
+
+        opt.exercised = true;
+        opt.active = false;
+        emit BundleOptionExercised(bundleOptId, msg.sender);
+    }
+
+    /// @notice Cancel a bundle option before any buyer. Returns Bundle NFT to writer.
+    function cancelBundleOption(uint256 bundleOptId) external nonReentrant {
+        BundleCallOption storage opt = bundleOptions[bundleOptId];
+        require(opt.active && opt.buyer == address(0), "Cannot cancel");
+        require(msg.sender == opt.writer, "Not writer");
+
+        IERC721(opt.bundleVault).transferFrom(address(this), opt.writer, opt.bundleId);
+        opt.active = false;
+        emit BundleOptionCancelled(bundleOptId);
+    }
+
+    /// @notice Reclaim Bundle NFT after expiry (option expired unexercised).
+    function reclaimBundle(uint256 bundleOptId) external nonReentrant {
+        BundleCallOption storage opt = bundleOptions[bundleOptId];
+        require(msg.sender == opt.writer, "Not writer");
+        require(block.timestamp > opt.expiry, "Not expired");
+        require(!opt.exercised && opt.active, "Invalid state");
+
+        IERC721(opt.bundleVault).transferFrom(address(this), opt.writer, opt.bundleId);
+        opt.active = false;
+        emit BundleReclaimed(bundleOptId);
     }
 
     function _authorizeUpgrade(address) internal override onlyRole(UPGRADER_ROLE) {}

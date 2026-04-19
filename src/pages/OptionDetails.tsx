@@ -1,7 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useReadContract, useAccount, usePublicClient, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
-import { formatUnits, parseAbiItem } from 'viem';
+import { formatUnits, parseAbiItem, parseUnits, parseAbi } from 'viem';
 import { ArrowLeft, ShieldAlert, TrendingUp, Clock, Activity, Info, ShieldCheck, ChevronDown, ChevronUp, User, Copy, Check, ExternalLink } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { CONTRACT_ADDRESSES, clawStreetCallVaultABI, getAgentInfo, PYTH_FEEDS, BASESCAN, getTokenSymbol, getTokenIconUrl } from '../config/contracts';
@@ -169,6 +169,31 @@ export default function OptionDetails() {
   const { writeContract: exerciseOpt, isPending: isExercising, data: exerciseTxHash } = useWriteContract();
   const { isLoading: isExerciseConfirming, isSuccess: isExerciseSuccess } = useWaitForTransactionReceipt({ hash: exerciseTxHash });
 
+  // Strike amount in raw USDC units (6 decimals) — needed for approve step
+  // displayData.strike is a formatted string like "2000"; parseUnits converts to 2000000000n
+  const strikeRaw = (() => {
+    try { return parseUnits(displayData?.strike ?? '0', 6); } catch { return 0n; }
+  })();
+
+  // Read current USDC allowance for CALL_VAULT (buyer must approve strike before exercising)
+  const { data: usdcAllowance, refetch: refetchAllowance } = useReadContract({
+    address: CONTRACT_ADDRESSES.MOCK_USDC,
+    abi: parseAbi(['function allowance(address,address) view returns (uint256)']),
+    functionName: 'allowance',
+    args: [address ?? '0x0000000000000000000000000000000000000000', CONTRACT_ADDRESSES.CALL_VAULT],
+    query: { enabled: !!address },
+  });
+
+  const needsApproval = !usdcAllowance || usdcAllowance < strikeRaw;
+
+  // Separate write hook for the USDC approve transaction (step 1 of 2)
+  const { writeContract: approveUsdc, isPending: isApproving, data: approveTxHash } = useWriteContract();
+  const { isSuccess: isApproveSuccess } = useWaitForTransactionReceipt({ hash: approveTxHash });
+
+  useEffect(() => {
+    if (isApproveSuccess) refetchAllowance();
+  }, [isApproveSuccess, refetchAllowance]);
+
   const handleExercise = () => {
     exerciseOpt({
       address: CONTRACT_ADDRESSES.CALL_VAULT,
@@ -313,16 +338,31 @@ export default function OptionDetails() {
               Generate Certificate
             </button>
           )}
-          {/* Exercise button — buyer only, active, not expired */}
+          {/* Exercise — 2-step: approve USDC for strike, then exercise */}
           {!isMockData && optionData && displayData.active && !displayData.exercised && !isExpired &&
            !isAvailable && address && displayData.buyer.toLowerCase() === address.toLowerCase() && (
-            <button
-              onClick={handleExercise}
-              disabled={isExercising || isExerciseConfirming || isExerciseSuccess}
-              className="px-5 py-2.5 bg-claw-pink text-white rounded-lg font-semibold text-sm hover:bg-claw-dark transition-colors disabled:opacity-50"
-            >
-              {isExercising || isExerciseConfirming ? 'Exercising…' : isExerciseSuccess ? 'Exercised ✓' : 'Exercise Option'}
-            </button>
+            needsApproval ? (
+              <button
+                onClick={() => approveUsdc({
+                  address: CONTRACT_ADDRESSES.MOCK_USDC,
+                  abi: parseAbi(['function approve(address,uint256) returns (bool)']),
+                  functionName: 'approve',
+                  args: [CONTRACT_ADDRESSES.CALL_VAULT, strikeRaw],
+                } as any)}
+                disabled={isApproving}
+                className="px-5 py-2.5 bg-base-blue text-white rounded-lg font-semibold text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
+              >
+                {isApproving ? 'Approving…' : `Approve ${displayData.strike} USDC (1/2)`}
+              </button>
+            ) : (
+              <button
+                onClick={handleExercise}
+                disabled={isExercising || isExerciseConfirming || isExerciseSuccess}
+                className="px-5 py-2.5 bg-claw-pink text-white rounded-lg font-semibold text-sm hover:bg-claw-dark transition-colors disabled:opacity-50"
+              >
+                {isExercising || isExerciseConfirming ? 'Exercising…' : isExerciseSuccess ? 'Exercised ✓' : 'Exercise Option (2/2)'}
+              </button>
+            )
           )}
         </div>
       </div>

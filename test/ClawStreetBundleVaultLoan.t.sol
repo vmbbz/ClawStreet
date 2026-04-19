@@ -122,6 +122,13 @@ contract ClawStreetBundleVaultLoan is Test {
 
         vm.stopPrank();
 
+        // Configure bundle-aware collateral pricing
+        vm.startPrank(admin);
+        loan.setBundleVault(address(vault));
+        // Mock returns the same price for any feedId, so bytes32(uint256(1)) suffices
+        loan.setTokenPriceFeed(address(weth), bytes32(uint256(1)));
+        vm.stopPrank();
+
         // Fund actors
         weth.mint(borrower, 10e18);      // 10 tWETH to borrower
         usdc.mint(lender, 10_000e6);     // 10k USDC to lender
@@ -220,14 +227,63 @@ contract ClawStreetBundleVaultLoan is Test {
         // Warp past loan duration
         vm.warp(block.timestamp + DURATION + 1);
 
-        // Lender claims default — gets Bundle NFT
+        // Lender claims default — bundle is auto-unwrapped and split proportionally
+        // debt = 400 + 24 = 424 USDC; bundleValue = 0.5 WETH * $2000 = 1000 USDC
+        // lenderFraction = 424/1000 = 0.424 → lenderWeth ≈ 0.212 WETH; borrower ≈ 0.288 WETH
         vm.prank(lender);
         loan.claimDefault(loanId);
 
-        assertEq(vault.ownerOf(bundleId), lender, "lender receives bundle NFT on default");
+        uint256 debt = PRINCIPAL + INTEREST; // 424e6
+        uint256 bundleVal = 1000e6;          // 0.5 WETH * $2000
+        uint256 expectedLenderWad = (debt * 1e18) / bundleVal;
+        uint256 expectedLenderWeth   = (WETH_AMT * expectedLenderWad) / 1e18;
+        uint256 expectedBorrowerWeth = WETH_AMT - expectedLenderWeth;
+
+        // Borrower's WETH balance = initial (10e18) - deposited (0.5e18) + returned (expectedBorrowerWeth)
+        assertApproxEqAbs(weth.balanceOf(lender),   expectedLenderWeth,                      1e9, "lender proportional WETH");
+        assertApproxEqAbs(weth.balanceOf(borrower), 10e18 - WETH_AMT + expectedBorrowerWeth, 1e9, "borrower residual WETH");
+
+        // Bundle NFT is burned — lender does NOT hold the NFT
+        assertEq(vault.balanceOf(lender), 0, "lender receives assets not the Bundle NFT");
 
         (,,,,,,,,, bool active4,) = loan.loans(loanId);
         assertFalse(active4, "loan should be inactive after default");
+    }
+
+    function test_bundleDefault_fullDefault_lenderGetsAll() public {
+        // Bundle value ($500) < debt ($900) → lender gets 100% of assets
+        uint256 smallAmt = 0.25e18; // 0.25 WETH * $2000 = $500
+
+        address[] memory erc20s  = new address[](1); erc20s[0]  = address(weth);
+        uint256[] memory amts    = new uint256[](1); amts[0]    = smallAmt;
+        address[] memory erc721s = new address[](0);
+        uint256[] memory ids     = new uint256[](0);
+
+        vm.startPrank(borrower);
+        weth.approve(address(vault), smallAmt);
+        uint256 bundleId = vault.depositBundle(erc20s, amts, erc721s, ids, "");
+        vault.approve(address(loan), bundleId);
+        // principal 800 + interest 100 = 900 USDC debt > 500 USDC bundle value
+        loan.createLoanOffer(address(vault), bundleId, 800e6, 100e6, DURATION);
+        vm.stopPrank();
+
+        uint256 loanId = loan.loanCounter() - 1;
+
+        vm.startPrank(lender);
+        usdc.approve(address(loan), 800e6);
+        loan.acceptLoan{value: 0}(loanId, new bytes[](0));
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + DURATION + 1);
+
+        uint256 borrowerWethBefore = weth.balanceOf(borrower);
+
+        vm.prank(lender);
+        loan.claimDefault(loanId);
+
+        assertEq(weth.balanceOf(lender),   smallAmt,           "lender gets all WETH (full default)");
+        assertEq(weth.balanceOf(borrower), borrowerWethBefore, "borrower receives nothing");
+        assertEq(vault.balanceOf(lender),  0,                  "bundle NFT burned not transferred");
     }
 
     function test_bundleContainsCorrectAssets() public {
@@ -251,9 +307,8 @@ contract ClawStreetBundleVaultLoan is Test {
         loan.createLoanOffer(address(vault), bundleId, PRINCIPAL, INTEREST, DURATION);
 
         uint256 health = loan.getHealthScore(address(vault), bundleId, PRINCIPAL, borrower);
-        // At price $2000 and principal 400 USDC → LTV = 400/2000 = 20% → well under 50% safe threshold
-        // Expect health score = 100 (max, no penalty)
-        assertEq(health, 100, "health score should be 100 for 20% LTV");
+        // Bundle-aware pricing: 0.5 WETH * $2000 = $1000 value. Principal = $400. LTV = 40% → health 100.
+        assertEq(health, 100, "health score should be 100 for bundle LTV 40%");
     }
 
     function test_cancelLoanOffer_returnsBundle() public {
