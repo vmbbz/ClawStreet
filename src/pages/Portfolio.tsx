@@ -432,7 +432,7 @@ function LentItem({ id, isMock }: { id: number, isMock: boolean, key?: React.Key
 
 // ─── Options: Written ─────────────────────────────────────────────────────────
 
-function WrittenOptionItem({ id, isMock }: { id: number; isMock: boolean }) {
+function WrittenOptionItem({ id, isMock }: { key?: React.Key; id: number; isMock: boolean }) {
   const { address } = useAccount();
 
   const { data: optionData } = useReadContract({
@@ -511,7 +511,7 @@ function WrittenOptionItem({ id, isMock }: { id: number; isMock: boolean }) {
 
 // ─── Options: Bought ──────────────────────────────────────────────────────────
 
-function BoughtOptionItem({ id, isMock }: { id: number; isMock: boolean }) {
+function BoughtOptionItem({ id, isMock }: { key?: React.Key; id: number; isMock: boolean }) {
   const { address } = useAccount();
 
   const { data: optionData } = useReadContract({

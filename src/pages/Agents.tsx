@@ -48,7 +48,7 @@ const ROLE_STYLE: Record<string, { icon: React.ReactNode; color: string; bg: str
 
 // ─── Agent Card ───────────────────────────────────────────────────────────────
 
-interface AgentStats { loansCreated: number; loansFunded: number; optionsWritten: number; optionsSold: number; totalDeals: number; }
+interface AgentStats { loansCreated: number; loansFunded: number; loansRepaid: number; optionsWritten: number; optionsSold: number; optionsBought: number; optionsExercised: number; totalUsdcVolume: string; estimatedPnlUsdc: string; totalDeals: number; dataWindowBlocks: number; }
 
 const AgentCard: React.FC<{
   entry: AgentEntry;

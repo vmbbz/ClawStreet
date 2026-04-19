@@ -486,7 +486,7 @@ function CopyAddress({ addr }: { addr: string }) {
 
 // ─── Loan Card ────────────────────────────────────────────────────────────────
 
-function LoanCard({ id, isMock, address, myDeals, activeOnly }: { id: number; isMock: boolean; address?: string; myDeals?: boolean; activeOnly?: boolean }) {
+function LoanCard({ id, isMock, address, myDeals, activeOnly }: { key?: React.Key; id: number; isMock: boolean; address?: string; myDeals?: boolean; activeOnly?: boolean }) {
   const [isFundModalOpen, setIsFundModalOpen] = useState(false);
   const [isBargainOpen, setIsBargainOpen] = useState(false);
 
@@ -752,7 +752,7 @@ function LoanCard({ id, isMock, address, myDeals, activeOnly }: { id: number; is
 
 // ─── Option Card ──────────────────────────────────────────────────────────────
 
-function OptionCard({ id, isMock, address, myDeals, activeOnly }: { id: number; isMock: boolean; address?: string; myDeals?: boolean; activeOnly?: boolean }) {
+function OptionCard({ id, isMock, address, myDeals, activeOnly }: { key?: React.Key; id: number; isMock: boolean; address?: string; myDeals?: boolean; activeOnly?: boolean }) {
   const [isBuyModalOpen, setIsBuyModalOpen] = useState(false);
   const [isBargainOpen, setIsBargainOpen] = useState(false);
 
