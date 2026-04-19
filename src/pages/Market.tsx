@@ -3,7 +3,7 @@
  * Combines Marketplace (loans) + HedgeVault (options) into one filterable page.
  * The old /vault route redirects here via App.tsx.
  */
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import {
@@ -562,10 +562,13 @@ function LoanCard({ id, isMock, address, myDeals, activeOnly }: { key?: React.Ke
     }
   };
 
-  // Toast on success
-  if (isFundSuccess && fundTxHash) {
-    toast.tx(`Loan #${id} funded successfully!`, fundTxHash);
-  }
+  // Toast + close modal on fund success
+  useEffect(() => {
+    if (isFundSuccess && fundTxHash) {
+      toast.tx(`Loan #${id} funded successfully!`, fundTxHash);
+      setIsFundModalOpen(false);
+    }
+  }, [isFundSuccess, fundTxHash]);
 
   const agentInfo = loanData ? getAgentInfo(loanData[0]) : null;
 
@@ -747,13 +750,13 @@ function LoanCard({ id, isMock, address, myDeals, activeOnly }: { key?: React.Ke
             {fundError && <div className="p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-400 text-xs break-all">{(fundError as Error).message?.split('\n')[0]}</div>}
             {!address ? (
               <div className="w-full py-2.5 bg-cyber-border text-gray-400 rounded-lg font-medium text-sm text-center">Connect Wallet</div>
-            ) : needsApproval ? (
+            ) : isFundSuccess ? null : needsApproval ? (
               <button onClick={handleApprove} disabled={isApproving || isApproveConfirming} className="w-full py-2.5 bg-yellow-500 text-black rounded-lg font-medium text-sm hover:bg-yellow-400 transition-colors disabled:opacity-50">
                 {isApproving || isApproveConfirming ? 'Approving USDC...' : `1. Approve ${displayData.principal} USDC`}
               </button>
             ) : (
-              <button onClick={handleFund} disabled={isFunding || isFundConfirming || isFundSuccess} className="w-full py-2.5 bg-base-blue text-white rounded-lg font-medium text-sm hover:bg-base-dark transition-colors disabled:opacity-50">
-                {isFunding || isFundConfirming ? 'Confirming...' : isFundSuccess ? 'Funded ✓' : 'Confirm & Fund'}
+              <button onClick={handleFund} disabled={isFunding || isFundConfirming} className="w-full py-2.5 bg-base-blue text-white rounded-lg font-medium text-sm hover:bg-base-dark transition-colors disabled:opacity-50">
+                {isFunding || isFundConfirming ? 'Confirming...' : 'Confirm & Fund'}
               </button>
             )}
           </div>
@@ -807,10 +810,13 @@ function OptionCard({ id, isMock, address, myDeals, activeOnly }: { key?: React.
     buyOption({ address: CONTRACT_ADDRESSES.CALL_VAULT, abi: clawStreetCallVaultABI, functionName: 'buyOption', args: [BigInt(id)] } as any);
   };
 
-  // Toast on buy success
-  if (isBuySuccess && buyTxHash) {
-    toast.tx(`Option #${id} purchased!`, buyTxHash);
-  }
+  // Toast + close modal on buy success (useEffect prevents setState-in-render warning)
+  useEffect(() => {
+    if (isBuySuccess && buyTxHash) {
+      toast.tx(`Option #${id} purchased!`, buyTxHash);
+      setIsBuyModalOpen(false);
+    }
+  }, [isBuySuccess, buyTxHash]);
 
   const agentInfo = optionData ? getAgentInfo(optionData[0]) : null;
   const expirySecondsLeft = optionData ? Number(optionData[5]) - Date.now() / 1000 : null;
@@ -971,13 +977,13 @@ function OptionCard({ id, isMock, address, myDeals, activeOnly }: { key?: React.
             {buyError && <div className="p-3 bg-red-500/20 border border-red-500/50 rounded-lg text-red-400 text-xs break-all">{(buyError as Error).message?.split('\n')[0]}</div>}
             {!address ? (
               <div className="w-full py-2.5 bg-cyber-border text-gray-400 rounded-lg font-medium text-sm text-center">Connect Wallet</div>
-            ) : needsApprovalOpt ? (
+            ) : isBuySuccess ? null : needsApprovalOpt ? (
               <button onClick={handleApproveOpt} disabled={isApprovingOpt || isApproveConfirmingOpt} className="w-full py-2.5 bg-yellow-500 text-black rounded-lg font-medium text-sm hover:bg-yellow-400 transition-colors disabled:opacity-50">
                 {isApprovingOpt || isApproveConfirmingOpt ? 'Approving USDC...' : `1. Approve ${displayData.premium} USDC`}
               </button>
             ) : (
-              <button onClick={handleBuy} disabled={isBuying || isBuyConfirming || isBuySuccess} className="w-full py-2.5 bg-base-blue text-white rounded-lg font-medium text-sm hover:bg-base-dark transition-colors disabled:opacity-50">
-                {isBuying || isBuyConfirming ? 'Confirming...' : isBuySuccess ? 'Purchased ✓' : 'Confirm Purchase'}
+              <button onClick={handleBuy} disabled={isBuying || isBuyConfirming} className="w-full py-2.5 bg-base-blue text-white rounded-lg font-medium text-sm hover:bg-base-dark transition-colors disabled:opacity-50">
+                {isBuying || isBuyConfirming ? 'Confirming...' : 'Confirm Purchase'}
               </button>
             )}
           </div>
