@@ -340,20 +340,21 @@ export default function Agents() {
       if (res.ok) {
         const entries: AgentEntry[] = await res.json();
         setRegistry(entries);
-        // Fetch stats for all entries in parallel (best-effort, always populate map)
-        const results = await Promise.allSettled(
-          entries.map(e => fetch(`/api/agents/${e.address}/stats`).then(r => r.json()))
-        );
+        // Single bulk request — 3 RPC calls total regardless of agent count
+        const addresses = entries.map(e => e.address).join(',');
+        const bulkRes = await fetch(`/api/agents/stats/bulk?addresses=${addresses}`);
+        const bulkData: Record<string, AgentStats> = bulkRes.ok ? await bulkRes.json() : {};
         const map = new Map<string, AgentStats>();
         const zeroStats = (): AgentStats => ({
           loansCreated: 0, loansFunded: 0, loansRepaid: 0,
           optionsWritten: 0, optionsSold: 0, optionsBought: 0, optionsExercised: 0,
           totalUsdcVolume: '0', estimatedPnlUsdc: '0', totalDeals: 0, dataWindowBlocks: -1,
         });
-        results.forEach((r, i) => {
-          const addr = entries[i].address.toLowerCase();
-          if (r.status === 'fulfilled' && r.value && !r.value.error) {
-            map.set(addr, r.value as AgentStats);
+        entries.forEach(e => {
+          const addr = e.address.toLowerCase();
+          const stats = bulkData[addr];
+          if (stats && typeof stats.totalDeals === 'number') {
+            map.set(addr, stats);
           } else {
             map.set(addr, zeroStats());
           }

@@ -50,6 +50,9 @@ const VAULT_ABI = parseAbi([
 const cache = new Map<string, { stats: AgentStats; expiresAt: number }>();
 const CACHE_TTL_MS = 60_000;
 
+// Bulk cache: keyed by sorted address list so repeated identical loads hit cache
+const bulkCache = new Map<string, { result: Record<string, AgentStats>; expiresAt: number }>();
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export async function getAddressStats(address: string): Promise<AgentStats> {
@@ -61,6 +64,118 @@ export async function getAddressStats(address: string): Promise<AgentStats> {
   const stats = await fetchStats(key);
   cache.set(key, { stats, expiresAt: Date.now() + CACHE_TTL_MS });
   return stats;
+}
+
+/**
+ * Bulk variant — reads ALL loans + options ONCE (3 RPC calls total regardless
+ * of agent count) and filters per-address in-memory. Use this when fetching
+ * stats for multiple addresses to avoid N parallel RPC bursts.
+ */
+export async function getAllAgentsStats(
+  addresses: string[],
+): Promise<Record<string, AgentStats>> {
+  if (addresses.length === 0) return {};
+
+  const keys = addresses.map(a => a.toLowerCase());
+  const cacheKey = [...keys].sort().join(',');
+
+  const cached = bulkCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.result;
+
+  const client = createPublicClient({ chain: baseSepolia, transport: http(RPC_URL) });
+
+  try {
+    // 1 multicall — get total counts
+    const [loanCount, optionCount] = await client.multicall({
+      contracts: [
+        { address: LOAN_ENGINE, abi: LOAN_ABI, functionName: 'loanCounter' as const },
+        { address: CALL_VAULT,  abi: VAULT_ABI, functionName: 'optionCounter' as const },
+      ],
+      allowFailure: false,
+    }) as [bigint, bigint];
+
+    // 1 multicall — all loans
+    const loanIds = Array.from({ length: Number(loanCount) }, (_, i) => BigInt(i));
+    const loanResults = loanIds.length > 0
+      ? await client.multicall({
+          contracts: loanIds.map(id => ({
+            address: LOAN_ENGINE as `0x${string}`, abi: LOAN_ABI,
+            functionName: 'loans' as const, args: [id] as const,
+          })),
+          allowFailure: true,
+        })
+      : [];
+    const loans = loanResults
+      .map(r => r.status === 'success' ? r.result as any[] : null)
+      .filter((l): l is any[] => l !== null);
+
+    // 1 multicall — all options
+    const optionIds = Array.from({ length: Number(optionCount) }, (_, i) => BigInt(i));
+    const optionResults = optionIds.length > 0
+      ? await client.multicall({
+          contracts: optionIds.map(id => ({
+            address: CALL_VAULT as `0x${string}`, abi: VAULT_ABI,
+            functionName: 'options' as const, args: [id] as const,
+          })),
+          allowFailure: true,
+        })
+      : [];
+    const options = optionResults
+      .map(r => r.status === 'success' ? r.result as any[] : null)
+      .filter((o): o is any[] => o !== null);
+
+    // Filter per-address in memory — O(keys × deals), no extra RPC
+    const ZERO = '0x0000000000000000000000000000000000000000';
+    const result: Record<string, AgentStats> = {};
+
+    for (const addr of keys) {
+      const loansCreated  = loans.filter(l => l[0]?.toLowerCase() === addr).length;
+      const loansFunded   = loans.filter(l => l[1]?.toLowerCase() === addr && l[1] !== ZERO).length;
+      const loansRepaid   = loans.filter(l => l[0]?.toLowerCase() === addr && l[10] === true).length;
+
+      let estimatedPnl = 0n, totalVolume = 0n;
+      for (const l of loans) {
+        const principal = l[4] as bigint ?? 0n;
+        const interest  = l[5] as bigint ?? 0n;
+        const repaid    = l[10] as boolean;
+        if (l[0]?.toLowerCase() === addr) totalVolume += principal;
+        if (l[1]?.toLowerCase() === addr && l[1] !== ZERO) {
+          totalVolume += principal;
+          if (repaid) estimatedPnl += interest;
+        }
+      }
+
+      const optionsWritten   = options.filter(o => o[0]?.toLowerCase() === addr).length;
+      const optionsBought    = options.filter(o => o[1]?.toLowerCase() === addr && o[1] !== ZERO).length;
+      const optionsSold      = options.filter(o => o[0]?.toLowerCase() === addr && o[1] !== ZERO).length;
+      const optionsExercised = options.filter(o => o[1]?.toLowerCase() === addr && o[7] === true).length;
+      for (const o of options) {
+        if (o[0]?.toLowerCase() === addr && o[1] !== ZERO) {
+          estimatedPnl += o[6] as bigint ?? 0n;
+          totalVolume  += o[6] as bigint ?? 0n;
+        }
+      }
+
+      const stats: AgentStats = {
+        address: addr,
+        loansCreated, loansFunded, loansRepaid,
+        optionsWritten, optionsSold, optionsBought, optionsExercised,
+        totalUsdcVolume:  formatUnits(totalVolume, 6),
+        estimatedPnlUsdc: formatUnits(estimatedPnl, 6),
+        totalDeals: loansCreated + loansFunded + optionsWritten + optionsBought,
+        dataWindowBlocks: -1,
+      };
+      result[addr] = stats;
+      // Also prime the per-address cache
+      cache.set(addr, { stats, expiresAt: Date.now() + CACHE_TTL_MS });
+    }
+
+    bulkCache.set(cacheKey, { result, expiresAt: Date.now() + CACHE_TTL_MS });
+    return result;
+  } catch (err) {
+    console.error('[stats] bulk fetch failed:', err);
+    return Object.fromEntries(keys.map(a => [a, emptyStats(a)]));
+  }
 }
 
 // ─── Core fetch (contract reads — no block range constraint) ──────────────────

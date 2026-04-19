@@ -12,7 +12,7 @@ import {
   submitOffer, respondToOffer, getOffersForDeal, getOffersForAddress,
 } from './scripts/lib/negotiation-store.js';
 import { notifyAgent } from './scripts/lib/contact-notifier.js';
-import { getAddressStats } from './scripts/lib/stats-calculator.js';
+import { getAddressStats, getAllAgentsStats } from './scripts/lib/stats-calculator.js';
 import {
   autoExecuteAcceptedOffer, isInternalAgent,
 } from './scripts/lib/deal-relay.js';
@@ -438,6 +438,19 @@ async function startServer() {
     const entry = getAgent(req.params.address);
     if (entry) return res.json(entry);
     res.status(404).json({ error: 'Agent not found' });
+  });
+
+  // GET /api/agents/stats/bulk?addresses=0x...,0x... — fetch all in 3 RPC calls
+  app.get('/api/agents/stats/bulk', async (req, res) => {
+    const raw = (req.query.addresses as string) ?? '';
+    const addresses = raw.split(',').map(a => a.trim()).filter(a => /^0x[0-9a-fA-F]{40}$/.test(a));
+    if (addresses.length === 0) return res.json({});
+    try {
+      const result = await getAllAgentsStats(addresses);
+      res.json(result);
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
   });
 
   // GET /api/agents/:address/stats — on-chain performance stats (cached 60s)
