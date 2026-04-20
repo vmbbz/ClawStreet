@@ -3,8 +3,8 @@
 **Protocol:** ClawStreet DeFi Infrastructure
 **Network:** Base Sepolia (testnet)
 **Framework:** Foundry (forge)
-**Test suite:** 290 tests across 11 files (277 unit/fuzz + 13 stateful invariants)
-**Coverage:** ClawToken, Staking, Loan Engine, Call Vault, Bundle Vault, BundleVault→LoanEngine integration
+**Test suite:** 300 tests across 12 files (287 unit/fuzz + 13 stateful invariants)
+**Coverage:** ClawToken, Staking, Loan Engine, Call Vault, Bundle Vault, BundleVault→LoanEngine integration, Bundle Covered Calls
 
 ---
 
@@ -22,8 +22,9 @@
 | `test/ClawStreetBundleVault.t.sol` | 13 | Unit |
 | `test/invariants/StakingInvariant.t.sol` | 7 | Stateful invariant (128k calls each) |
 | `test/invariants/CallVaultInvariant.t.sol` | 6 | Stateful invariant (128k calls each) |
-| `test/ClawStreetBundleVaultLoan.t.sol` | 6 | Integration: BundleVault → LoanEngine end-to-end |
-| **Total** | **290** | |
+| `test/ClawStreetBundleVaultLoan.t.sol` | 7 | Integration: BundleVault → LoanEngine end-to-end + proportional default |
+| `test/ClawStreetBundleCallVault.t.sol` | 9 | Unit: bundle covered call options (write/buy/exercise/cancel/reclaim) |
+| **Total** | **300** | |
 
 ---
 
@@ -125,7 +126,7 @@ forge test
 
 **Output:**
 ```
-Ran 10 test suites in 292.67s: 284 tests passed, 0 failed, 0 skipped (284 total tests)
+Ran 12 test suites in 729.42s: 300 tests passed, 0 failed, 0 skipped (300 total tests)
 ```
 
 ---
@@ -403,6 +404,53 @@ Full test suite for Bundle Vault (no prior tests existed).
 ```bash
 forge test --match-contract ClawStreetBundleVaultTest -vv
 ```
+
+---
+
+### `test/ClawStreetBundleVaultLoan.t.sol`
+
+End-to-end integration: Bundle NFT as loan collateral with bundle-aware health scoring and proportional default settlement.
+
+| Test | What it checks |
+|------|---------------|
+| `test_createLoan_withBundleNFT` | Bundle NFT accepted as collateral, escrowed in LoanEngine |
+| `test_healthScore_withBundleNFT` | Bundle value priced per-token via Pyth → correct health score |
+| `test_fullFlow_repay` | Borrow → repay → borrower reclaims Bundle NFT |
+| `test_fullFlow_default` | **Proportional default:** lender gets 42.4% of WETH (debt/bundleValue), borrower keeps 57.6% |
+| `test_setBundleVault_onlyAdmin` | Only ADMIN_ROLE can set the bundleVault address |
+| `test_setTokenPriceFeed_onlyAdmin` | Only ADMIN_ROLE can map a token to a Pyth feed |
+| `test_bundleDefault_fullDefault_lenderGetsAll` | Bundle value < debt → lender receives 100% of all ERC-20s |
+
+```bash
+forge test --match-contract ClawStreetBundleVaultLoanTest -vv
+```
+
+**Key math:** `lenderFraction = debt × 1e18 / bundleValue`. Full default when `bundleValue ≤ debt`.
+Partial default (e.g., bundle = $1000, debt = $424): lender gets 42.4% of each ERC-20; borrower keeps 57.6%. ERC-721s inside the bundle always go to the lender (non-divisible).
+
+---
+
+### `test/ClawStreetBundleCallVault.t.sol`
+
+Unit tests for bundle covered call options (Bundle NFT as option underlying).
+
+| Test | What it checks |
+|------|---------------|
+| `test_writeBundleCall_locksNFT` | Bundle NFT transferred to CallVault on option creation |
+| `test_buyBundleOption_paysPremium` | Buyer pays premium to writer immediately on purchase |
+| `test_exerciseBundleOption_twoStep` | Buyer approves strike USDC → exercises → receives Bundle NFT |
+| `test_exerciseBundleOption_buyerCanUnwrap` | After exercise, buyer calls `withdrawBundle()` to receive underlying ERC-20s |
+| `test_cancelBundleOption_returnsNFT` | Writer cancels unbought option → Bundle NFT returned |
+| `test_reclaimBundle_afterExpiry` | Writer reclaims Bundle NFT after expiry (option never exercised) |
+| `test_cannotExercise_withoutApproval` | Exercise reverts if buyer hasn't approved strike USDC |
+| `test_cannotExercise_afterExpiry` | Exercise reverts after expiry timestamp |
+| `test_cannotCancel_afterBuy` | Cancel reverts once a buyer has purchased |
+
+```bash
+forge test --match-contract ClawStreetBundleCallVaultTest -vv
+```
+
+**Exercise flow:** Buyer must pre-approve `strike` USDC (not just premium) to the CallVault before calling `exerciseBundleOption`. After exercise, the buyer holds the Bundle NFT and can call `withdrawBundle()` on the BundleVault to receive the underlying ERC-20s and ERC-721s.
 
 ---
 
@@ -1022,4 +1070,4 @@ forge script script/DeployClawStreet.s.sol --rpc-url https://sepolia.base.org --
 
 ---
 
-*Last updated: April 2026 — ClawStreet v1 internal audit complete. 284 tests passing. Live on Base Sepolia with 3 loans, 3 options, 1 staking position.*
+*Last updated: April 2026 — ClawStreet v1 internal audit complete. 300 tests passing. Live on Base Sepolia with 3 loans, 3 options, 1 staking position. Bundle-aware health scoring, proportional default settlement, and bundle covered calls added.*

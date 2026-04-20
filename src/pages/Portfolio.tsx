@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useReadContract, useWriteContract, useAccount, useWaitForTransactionReceipt } from 'wagmi';
 import { formatUnits } from 'viem';
-import { CONTRACT_ADDRESSES, clawStreetLoanABI, clawStreetCallVaultABI } from '../config/contracts';
+import { CONTRACT_ADDRESSES, clawStreetLoanABI, clawStreetCallVaultABI, getTokenSymbol } from '../config/contracts';
 import { Modal } from '../components/Modal';
 import { AlertCircle, ShieldCheck, User, Loader2, Wallet, Target, Copy, Check } from 'lucide-react';
 import { toast } from '../components/Toast';
@@ -47,9 +47,9 @@ export default function Portfolio() {
   const loanIds = Array.from({ length: totalLoans }, (_, i) => i);
   const optionIds = Array.from({ length: totalOptions }, (_, i) => i);
 
-  const TABS: { key: PortfolioTab; label: string }[] = [
-    { key: 'loans',   label: 'Loans'   },
-    { key: 'options', label: 'Options' },
+  const TABS: { key: PortfolioTab; label: string; count: number }[] = [
+    { key: 'loans',   label: 'Loans',   count: totalLoans   },
+    { key: 'options', label: 'Options', count: totalOptions },
   ];
 
   return (
@@ -80,13 +80,22 @@ export default function Portfolio() {
           <button
             key={t.key}
             onClick={() => setTab(t.key)}
-            className={`px-4 py-2.5 text-sm font-medium rounded-t-md transition-colors ${
+            className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium rounded-t-md transition-colors ${
               tab === t.key
                 ? 'text-white border-b-2 border-base-blue -mb-px'
                 : 'text-gray-500 hover:text-gray-300'
             }`}
           >
             {t.label}
+            {!isLoading && t.count > 0 && (
+              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full ${
+                tab === t.key
+                  ? 'bg-base-blue/20 text-base-blue'
+                  : 'bg-white/8 text-gray-500'
+              }`}>
+                {t.count}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -449,7 +458,8 @@ function WrittenOptionItem({ id, isMock }: { key?: React.Key; id: number; isMock
   const displayData = isMock ? {
     writer: address,
     buyer: '0x0000000000000000000000000000000000000000',
-    underlying: '0xTestWETH',
+    underlying: '0xE93695aE429a2C156F216Bc615E9Dd8d1A9794dE',
+    underlyingSymbol: 'WETH',
     amount: '1.0',
     strike: '2000',
     premium: '50',
@@ -458,7 +468,8 @@ function WrittenOptionItem({ id, isMock }: { key?: React.Key; id: number; isMock
   } : optionData ? {
     writer: optionData[0],
     buyer: optionData[1],
-    underlying: `${optionData[2].slice(0, 6)}...${optionData[2].slice(-4)}`,
+    underlying: optionData[2],
+    underlyingSymbol: getTokenSymbol(optionData[2]),
     amount: formatUnits(optionData[3], 18),
     strike: formatUnits(optionData[4], 6),
     premium: formatUnits(optionData[5], 6),
@@ -471,24 +482,37 @@ function WrittenOptionItem({ id, isMock }: { key?: React.Key; id: number; isMock
   if (!displayData.active && !displayData.exercised) return null;
 
   const hasBuyer = displayData.buyer !== '0x0000000000000000000000000000000000000000';
+  const amtNum = parseFloat(displayData.amount);
+  const amtDisplay = amtNum < 0.001 ? amtNum.toFixed(6) : amtNum < 1 ? amtNum.toFixed(4) : amtNum.toFixed(2);
 
   return (
     <div className="bg-cyber-surface p-4 rounded-xl border border-cyber-border hover:border-claw-pink/30 transition-colors">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <Link to={`/option/${id}`} className="font-semibold text-white text-sm hover:text-claw-pink transition-colors flex items-center gap-1.5">
-            <Target size={12} className="text-claw-pink" />
+            <Target size={12} className="text-claw-pink shrink-0" />
             Call Option #{id}
           </Link>
-          <p className="text-xs text-gray-400 mt-1">{displayData.amount} tokens @ ${displayData.strike} strike</p>
-          <p className="text-[10px] mt-1 font-medium">
-            {displayData.exercised
-              ? <span className="text-gray-500">Exercised</span>
-              : hasBuyer
-              ? <span className="text-claw-pink">Sold — Premium: ${displayData.premium}</span>
-              : <span className="text-yellow-400">Open — Premium: ${displayData.premium}</span>
-            }
-          </p>
+          {/* Token symbol + amount */}
+          <div className="flex items-center gap-2 mt-1.5">
+            <span className="text-xs font-bold text-white bg-claw-pink/10 border border-claw-pink/25 px-2 py-0.5 rounded font-mono">
+              {displayData.underlyingSymbol}
+            </span>
+            <span className="text-xs text-gray-300 font-mono">{amtDisplay}</span>
+            <span className="text-gray-600 text-xs">@</span>
+            <span className="text-xs text-gray-300">${displayData.strike} <span className="text-gray-500">strike</span></span>
+          </div>
+          <div className="flex items-center gap-2 mt-1.5">
+            <span className="text-[10px] font-medium">
+              {displayData.exercised
+                ? <span className="text-gray-500 bg-gray-500/10 px-1.5 py-0.5 rounded">Exercised</span>
+                : hasBuyer
+                ? <span className="text-claw-pink bg-claw-pink/10 px-1.5 py-0.5 rounded">Sold</span>
+                : <span className="text-yellow-400 bg-yellow-400/10 px-1.5 py-0.5 rounded">Open</span>
+              }
+            </span>
+            <span className="text-[10px] text-gray-500">Premium: <span className="text-gray-300">${displayData.premium}</span></span>
+          </div>
         </div>
         {!hasBuyer && !displayData.exercised && (
           <button
@@ -499,7 +523,7 @@ function WrittenOptionItem({ id, isMock }: { key?: React.Key; id: number; isMock
               args: [BigInt(id)],
             } as any)}
             disabled={isCanceling || isCancelConfirming || isCancelSuccess}
-            className="px-3 py-1.5 text-xs bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50"
+            className="shrink-0 px-3 py-1.5 text-xs bg-red-500/10 text-red-400 border border-red-500/20 rounded-lg hover:bg-red-500/20 transition-colors disabled:opacity-50"
           >
             {isCanceling || isCancelConfirming ? 'Canceling...' : isCancelSuccess ? 'Cancelled' : 'Cancel'}
           </button>
@@ -528,6 +552,8 @@ function BoughtOptionItem({ id, isMock }: { key?: React.Key; id: number; isMock:
   const displayData = isMock ? null : optionData ? {
     writer: optionData[0],
     buyer: optionData[1],
+    underlying: optionData[2],
+    underlyingSymbol: getTokenSymbol(optionData[2]),
     amount: formatUnits(optionData[3], 18),
     strike: formatUnits(optionData[4], 6),
     expiry: Number(optionData[5]),
@@ -539,24 +565,40 @@ function BoughtOptionItem({ id, isMock }: { key?: React.Key; id: number; isMock:
   if (displayData.buyer !== address) return null;
 
   const isExpired = Math.floor(Date.now() / 1000) > displayData.expiry;
+  const amtNum = parseFloat(displayData.amount);
+  const amtDisplay = amtNum < 0.001 ? amtNum.toFixed(6) : amtNum < 1 ? amtNum.toFixed(4) : amtNum.toFixed(2);
+  const expiryDate = new Date(displayData.expiry * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
   return (
     <div className="bg-cyber-surface p-4 rounded-xl border border-cyber-border hover:border-claw-pink/30 transition-colors">
-      <div className="flex items-center justify-between">
-        <div>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <Link to={`/option/${id}`} className="font-semibold text-white text-sm hover:text-claw-pink transition-colors flex items-center gap-1.5">
-            <Target size={12} className="text-claw-pink" />
+            <Target size={12} className="text-claw-pink shrink-0" />
             Call Option #{id}
           </Link>
-          <p className="text-xs text-gray-400 mt-1">{displayData.amount} tokens @ ${displayData.strike}</p>
-          <p className="text-[10px] mt-1 font-medium">
-            {displayData.exercised
-              ? <span className="text-green-400">Exercised</span>
-              : isExpired
-              ? <span className="text-gray-500">Expired</span>
-              : <span className="text-claw-pink">Active</span>
-            }
-          </p>
+          {/* Token symbol + amount */}
+          <div className="flex items-center gap-2 mt-1.5">
+            <span className="text-xs font-bold text-white bg-claw-pink/10 border border-claw-pink/25 px-2 py-0.5 rounded font-mono">
+              {displayData.underlyingSymbol}
+            </span>
+            <span className="text-xs text-gray-300 font-mono">{amtDisplay}</span>
+            <span className="text-gray-600 text-xs">@</span>
+            <span className="text-xs text-gray-300">${displayData.strike} <span className="text-gray-500">strike</span></span>
+          </div>
+          <div className="flex items-center gap-2 mt-1.5">
+            <span className="text-[10px] font-medium">
+              {displayData.exercised
+                ? <span className="text-green-400 bg-green-400/10 px-1.5 py-0.5 rounded">Exercised ✓</span>
+                : isExpired
+                ? <span className="text-gray-500 bg-gray-500/10 px-1.5 py-0.5 rounded">Expired</span>
+                : <span className="text-claw-pink bg-claw-pink/10 px-1.5 py-0.5 rounded">Active</span>
+              }
+            </span>
+            {!isExpired && !displayData.exercised && (
+              <span className="text-[10px] text-gray-500">Exp <span className="text-gray-300">{expiryDate}</span></span>
+            )}
+          </div>
         </div>
         {!displayData.exercised && !isExpired && (
           <button
@@ -567,9 +609,9 @@ function BoughtOptionItem({ id, isMock }: { key?: React.Key; id: number; isMock:
               args: [BigInt(id)],
             } as any)}
             disabled={isExercising || isExerciseConfirming || isExerciseSuccess}
-            className="px-3 py-1.5 text-xs bg-claw-pink/15 text-claw-pink border border-claw-pink/30 rounded-lg hover:bg-claw-pink/25 transition-colors disabled:opacity-50"
+            className="shrink-0 px-3 py-1.5 text-xs bg-claw-pink/15 text-claw-pink border border-claw-pink/30 rounded-lg hover:bg-claw-pink/25 transition-colors disabled:opacity-50"
           >
-            {isExercising || isExerciseConfirming ? 'Exercising...' : isExerciseSuccess ? 'Done' : 'Exercise'}
+            {isExercising || isExerciseConfirming ? 'Exercising...' : isExerciseSuccess ? 'Done ✓' : 'Exercise'}
           </button>
         )}
       </div>

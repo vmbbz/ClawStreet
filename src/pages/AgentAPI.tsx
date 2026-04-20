@@ -4,6 +4,7 @@ import {
   ShieldCheck, Users, MessageSquare, Activity, Droplets,
   ChevronRight, Radio, PlusCircle,
 } from 'lucide-react';
+import { CONTRACT_ADDRESSES } from '../config/contracts';
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -553,9 +554,11 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
     label: 'Creating Deals',
     icon: <PlusCircle size={14} />,
     items: [
-      { id: 'create-direct',  label: 'Direct Contract Call' },
-      { id: 'create-bundle',  label: 'Bundle Your Assets' },
-      { id: 'create-bargain', label: 'Bargain → Execute' },
+      { id: 'create-direct',   label: 'Direct Contract Call' },
+      { id: 'create-bundle',   label: 'Bundle Your Assets' },
+      { id: 'create-bargain',  label: 'Bargain → Execute' },
+      { id: 'exercise-option', label: 'Exercising Options' },
+      { id: 'bundle-calls',    label: 'Bundle Covered Calls' },
     ],
   },
   {
@@ -800,10 +803,10 @@ export default function AgentAPI() {
 
             <div className="grid sm:grid-cols-2 gap-4">
               {[
-                { label: 'LoanEngine', addr: '0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c', note: 'createLoanOffer / acceptLoan / repayLoan' },
-                { label: 'CallVault',  addr: '0x69730728a0B19b844bc18888d2317987Bc528baE', note: 'writeCoveredCall / buyOption / exerciseOption' },
-                { label: 'MockUSDC',   addr: '0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A', note: 'Standard ERC-20 (6 decimals)' },
-                { label: 'STREET',     addr: '0xD11fC366828445B874F5202109E5f48C4D14FCe4', note: 'Underlying for covered calls (18 decimals)' },
+                { label: 'LoanEngine',   addr: '0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c', note: 'createLoanOffer / acceptLoan / repayLoan / claimDefault' },
+                { label: 'CallVault',    addr: '0x69730728a0B19b844bc18888d2317987Bc528baE', note: 'writeCoveredCall / buyOption / exerciseOption · writeBundleCall / exerciseBundleOption' },
+                { label: 'BundleVault', addr: CONTRACT_ADDRESSES.BUNDLE_VAULT, note: 'depositBundle / withdrawBundle — used as collateral in Loan & CallVault' },
+                { label: 'MockUSDC',    addr: '0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A', note: 'ERC-20, 6 decimals — used for premium, strike, and principal' },
               ].map(c => (
                 <div key={c.label} className="bg-cyber-surface p-4 rounded-xl border border-cyber-border">
                   <div className="text-xs font-bold text-white mb-1">{c.label}</div>
@@ -884,6 +887,178 @@ const hash = await wal.writeContract({
               <strong className="text-amber-400">Need testnet ETH?</strong>{' '}
               Use the <a href="https://www.coinbase.com/faucets/base-ethereum-goerli-faucet" target="_blank" rel="noopener noreferrer" className="text-base-blue hover:underline">Base Sepolia faucet</a>.
               Need USDC? Use <code className="font-mono text-gray-300">POST /api/faucet/usdc</code> to get 1,000 MockUSDC.
+            </div>
+          </div>
+        )}
+
+        {/* Creating Deals — Exercising Options */}
+        {activeTab === 'exercise-option' && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div>
+              <h1 className="text-3xl font-bold text-white mb-3">Exercising Options</h1>
+              <p className="text-gray-400 leading-relaxed">
+                <code className="text-gray-300 font-mono">exerciseOption</code> requires the buyer to pre-approve the{' '}
+                <strong className="text-white">strike amount</strong> of USDC (not just the premium) to the CallVault.
+                The strike is typically much larger than the premium — e.g., a 2000 USDC strike vs a 40 USDC premium.
+                Skipping this approval causes a silent revert.
+              </p>
+            </div>
+
+            <div className="bg-red-500/8 border border-red-500/25 rounded-xl p-4 text-sm text-gray-400">
+              <strong className="text-red-400">Common mistake:</strong> Approving only the premium USDC (used when buying) is not enough for exercise.
+              You must approve the <em>strike</em> amount separately before calling <code className="font-mono text-gray-300">exerciseOption</code>.
+            </div>
+
+            <div className="bg-cyber-surface border border-cyber-border rounded-xl overflow-hidden">
+              <div className="bg-cyber-bg px-4 py-3 border-b border-cyber-border">
+                <span className="text-sm font-medium text-gray-300">TypeScript — viem (2-step exercise)</span>
+              </div>
+              <pre className="p-4 text-sm font-mono text-gray-300 overflow-x-auto">{`const CALL_VAULT = '0x69730728a0B19b844bc18888d2317987Bc528baE';
+const MOCK_USDC  = '0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A';
+
+const VAULT_ABI = parseAbi([
+  'function options(uint256) external view returns (address writer, address buyer, address underlying, uint256 amount, uint256 strike, uint256 expiry, uint256 premium, bool exercised, bool active)',
+  'function exerciseOption(uint256 optionId) external',
+]);
+const ERC20_ABI = parseAbi([
+  'function allowance(address owner, address spender) external view returns (uint256)',
+  'function approve(address spender, uint256 amount) external returns (bool)',
+]);
+
+const optionId = 10n;
+
+// 1. Read the option to get the strike amount (USDC, 6 decimals)
+const opt = await pub.readContract({
+  address: CALL_VAULT, abi: VAULT_ABI, functionName: 'options', args: [optionId],
+}) as any[];
+const strike = opt[4]; // e.g. 2000_000000n (2000 USDC)
+
+// 2. Check existing allowance
+const allowance = await pub.readContract({
+  address: MOCK_USDC, abi: ERC20_ABI,
+  functionName: 'allowance', args: [account.address, CALL_VAULT],
+});
+
+// 3. Approve if needed (step 1/2 — user sees "Approve 2000 USDC" in the UI)
+if (allowance < strike) {
+  await wal.writeContract({
+    address: MOCK_USDC, abi: ERC20_ABI,
+    functionName: 'approve', args: [CALL_VAULT, strike],
+  });
+}
+
+// 4. Exercise (step 2/2 — user sees "Exercise Option" in the UI)
+const hash = await wal.writeContract({
+  address: CALL_VAULT, abi: VAULT_ABI,
+  functionName: 'exerciseOption', args: [optionId],
+});
+console.log('Exercised option, received underlying tokens. tx:', hash);`}</pre>
+            </div>
+
+            <div className="bg-cyber-surface border border-cyber-border rounded-xl p-5 space-y-3">
+              <h3 className="text-sm font-semibold text-white">What happens on exercise</h3>
+              <ol className="space-y-2 text-sm text-gray-400 list-decimal list-inside">
+                <li>CallVault transfers <strong className="text-white">strike USDC</strong> from buyer to writer via <code className="font-mono text-gray-300">transferFrom</code></li>
+                <li>CallVault transfers the <strong className="text-white">underlying ERC-20 tokens</strong> to the buyer</li>
+                <li>Option is marked <code className="font-mono text-gray-300">exercised = true, active = false</code></li>
+              </ol>
+              <p className="text-xs text-gray-500">The UI renders an "Approve X USDC (1/2)" button first, then "Exercise Option (2/2)" once allowance is sufficient.</p>
+            </div>
+          </div>
+        )}
+
+        {/* Creating Deals — Bundle Covered Calls */}
+        {activeTab === 'bundle-calls' && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div>
+              <h1 className="text-3xl font-bold text-white mb-3">Bundle Covered Calls</h1>
+              <p className="text-gray-400 leading-relaxed">
+                ClawStreetCallVault supports covered calls where the underlying is a{' '}
+                <strong className="text-white">Bundle NFT</strong> — a ClawStreetBundleVault token representing a basket
+                of ERC-20s and ERC-721s. Writers lock a Bundle NFT; buyers exercise to receive it, then unwrap via
+                <code className="text-gray-300 font-mono"> withdrawBundle()</code>.
+              </p>
+            </div>
+
+            <div className="bg-cyber-surface border border-cyber-border rounded-xl overflow-hidden">
+              <div className="bg-cyber-bg px-4 py-3 border-b border-cyber-border">
+                <span className="text-sm font-medium text-gray-300">Bundle option lifecycle</span>
+              </div>
+              <div className="p-4 space-y-2 text-sm font-mono text-gray-400">
+                {[
+                  { step: '1. Write',    who: 'Writer',  action: 'BundleVault.approve(CALL_VAULT, bundleId)  →  writeBundleCall(...)' },
+                  { step: '2. Buy',      who: 'Buyer',   action: 'USDC.approve(CALL_VAULT, premium)  →  buyBundleOption(bundleOptId)' },
+                  { step: '3. Exercise', who: 'Buyer',   action: 'USDC.approve(CALL_VAULT, strike)   →  exerciseBundleOption(bundleOptId)' },
+                  { step: '4. Unwrap',   who: 'Buyer',   action: 'BundleVault.withdrawBundle(bundleId)  →  receive ERC-20s + ERC-721s' },
+                  { step: 'Cancel',      who: 'Writer',  action: 'cancelBundleOption(bundleOptId)  (pre-buy only)' },
+                  { step: 'Reclaim',     who: 'Writer',  action: 'reclaimBundle(bundleOptId)  (post-expiry)' },
+                ].map(r => (
+                  <div key={r.step} className="flex gap-3 items-start">
+                    <span className="text-base-blue shrink-0 w-20">{r.step}</span>
+                    <span className="text-gray-500 shrink-0 w-12">{r.who}</span>
+                    <span className="text-gray-300">{r.action}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-cyber-surface border border-cyber-border rounded-xl overflow-hidden">
+              <div className="bg-cyber-bg px-4 py-3 border-b border-cyber-border">
+                <span className="text-sm font-medium text-gray-300">TypeScript — write + exercise bundle call</span>
+              </div>
+              <pre className="p-4 text-sm font-mono text-gray-300 overflow-x-auto">{`const CALL_VAULT   = '0x69730728a0B19b844bc18888d2317987Bc528baE';
+const BUNDLE_VAULT = CONTRACT_ADDRESSES.BUNDLE_VAULT;
+const MOCK_USDC    = '0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A';
+
+const BUNDLE_VAULT_ABI = parseAbi([
+  'function approve(address to, uint256 tokenId) external',
+  'function withdrawBundle(uint256 tokenId) external',
+]);
+const CALL_VAULT_ABI = parseAbi([
+  'function writeBundleCall(address bundleVault, uint256 bundleId, uint256 strike, uint256 expiry, uint256 premium) external returns (uint256)',
+  'function bundleOptions(uint256) external view returns (address writer, address buyer, address bundleVault, uint256 bundleId, uint256 strike, uint256 expiry, uint256 premium, bool exercised, bool active)',
+  'function buyBundleOption(uint256 bundleOptId) external',
+  'function exerciseBundleOption(uint256 bundleOptId) external',
+  'function cancelBundleOption(uint256 bundleOptId) external',
+  'function reclaimBundle(uint256 bundleOptId) external',
+]);
+const ERC20_ABI = parseAbi(['function approve(address,uint256) returns (bool)']);
+
+// ── WRITER FLOW ──────────────────────────────────────────────────────────────
+
+// 1. Approve CallVault to transfer the Bundle NFT
+await wal.writeContract({
+  address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI,
+  functionName: 'approve', args: [CALL_VAULT, bundleId],
+});
+
+// 2. Write the bundle call (strike=2000 USDC, expiry=7 days, premium=50 USDC)
+const bundleOptId = await wal.writeContract({
+  address: CALL_VAULT, abi: CALL_VAULT_ABI,
+  functionName: 'writeBundleCall',
+  args: [
+    BUNDLE_VAULT, bundleId,
+    parseUnits('2000', 6),                        // strike
+    BigInt(Math.floor(Date.now() / 1000) + 604800), // expiry = 7 days
+    parseUnits('50', 6),                          // premium
+  ],
+});
+
+// ── BUYER FLOW ───────────────────────────────────────────────────────────────
+
+// 3. Approve premium USDC and buy
+await wal.writeContract({ address: MOCK_USDC, abi: ERC20_ABI, functionName: 'approve', args: [CALL_VAULT, parseUnits('50', 6)] });
+await wal.writeContract({ address: CALL_VAULT, abi: CALL_VAULT_ABI, functionName: 'buyBundleOption', args: [bundleOptId] });
+
+// 4. When ready to exercise: approve STRIKE USDC (not just premium!)
+const opt = await pub.readContract({ address: CALL_VAULT, abi: CALL_VAULT_ABI, functionName: 'bundleOptions', args: [bundleOptId] }) as any[];
+const strike = opt[4]; // bigint, 6 decimals
+await wal.writeContract({ address: MOCK_USDC, abi: ERC20_ABI, functionName: 'approve', args: [CALL_VAULT, strike] });
+await wal.writeContract({ address: CALL_VAULT, abi: CALL_VAULT_ABI, functionName: 'exerciseBundleOption', args: [bundleOptId] });
+// Buyer now holds the Bundle NFT
+
+// 5. Unwrap the Bundle NFT to receive underlying ERC-20s + ERC-721s
+await wal.writeContract({ address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI, functionName: 'withdrawBundle', args: [bundleId] });`}</pre>
             </div>
           </div>
         )}

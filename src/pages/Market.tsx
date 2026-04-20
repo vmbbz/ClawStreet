@@ -210,7 +210,7 @@ function FaucetBanner({ address }: { address: string }) {
       {/* Bundle collateral row — only shown when TestTokens are deployed */}
       {hasTestTokens && (
         <div className="p-3 bg-teal-500/8 border border-teal-500/20 rounded-lg text-sm">
-          <div className="flex items-center gap-2 text-teal-300 mb-2">
+          <div className="flex items-center gap-2 text-grey-400 mb-2">
             <Droplets size={16} />
             <span>Bundle collateral faucets — deposit into BundleVault to create loan collateral</span>
           </div>
@@ -223,7 +223,7 @@ function FaucetBanner({ address }: { address: string }) {
                   <button
                     onClick={() => handleClaim(token)}
                     disabled={claiming !== null || isClaimed}
-                    className="px-2.5 py-1 bg-teal-600/40 hover:bg-teal-500/50 disabled:opacity-50 text-teal-200 rounded text-xs font-semibold transition-colors border border-teal-500/30"
+                    className="px-2.5 py-1 bg-teal-600/40 hover:bg-teal-500/50 disabled:opacity-50 text-white rounded text-xs font-semibold transition-colors border border-teal-500/30"
                   >
                     {isClaimed ? `✓ ${labels[token]} sent` : claiming === token ? 'Sending...' : `Get ${labels[token]}`}
                   </button>

@@ -6,6 +6,7 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { parseUnits, formatUnits } from 'viem';
 import {
   CONTRACT_ADDRESSES,
+  TEST_TOKENS,
   clawStreetLoanABI,
   clawStreetStakingABI,
   clawStreetCallVaultABI,
@@ -172,6 +173,36 @@ const SUITES: TestSuite[] = [
     ],
   },
   {
+    contract: 'ClawStreetBundleVaultLoan',
+    file: 'test/ClawStreetBundleVaultLoan.t.sol',
+    color: 'pink',
+    tests: [
+      { name: 'test_createLoan_withBundleNFT', label: 'Bundle NFT accepted as loan collateral', proves: 'BundleVault NFT can be escrowed in LoanEngine', category: 'Happy Path', gas: 420880 },
+      { name: 'test_healthScore_withBundleNFT', label: 'Bundle health score uses per-token Pyth pricing', proves: 'Multi-asset bundles are priced correctly (not as a single ETH)', category: 'Happy Path', gas: 85120 },
+      { name: 'test_fullFlow_repay', label: 'Full flow: borrow with bundle → repay → reclaim NFT', proves: 'End-to-end happy path — borrower gets bundle back on repayment', category: 'Happy Path', gas: 890440 },
+      { name: 'test_fullFlow_default', label: 'Proportional default split (partial: debt < bundleValue)', proves: 'Lender gets ~42.4% of WETH; borrower keeps ~57.6% — WAD-precision math', category: 'Edge Case', gas: 920100 },
+      { name: 'test_setBundleVault_onlyAdmin', label: 'setBundleVault restricted to ADMIN_ROLE', proves: 'Non-admin cannot register a bundle vault address', category: 'Edge Case', gas: 28440 },
+      { name: 'test_setTokenPriceFeed_onlyAdmin', label: 'setTokenPriceFeed restricted to ADMIN_ROLE', proves: 'Non-admin cannot map token to Pyth feed', category: 'Edge Case', gas: 28200 },
+      { name: 'test_bundleDefault_fullDefault_lenderGetsAll', label: 'Full default: bundle value < debt → lender gets 100%', proves: 'When debt exceeds bundle value, lender receives all ERC-20s and ERC-721s', category: 'Edge Case', gas: 910550 },
+    ],
+  },
+  {
+    contract: 'ClawStreetBundleCallVault',
+    file: 'test/ClawStreetBundleCallVault.t.sol',
+    color: 'pink',
+    tests: [
+      { name: 'test_writeBundleCall_locksNFT', label: 'Write bundle call locks Bundle NFT in vault', proves: 'Writer collateral (Bundle NFT) is held by CallVault on option creation', category: 'Happy Path', gas: 310440 },
+      { name: 'test_buyBundleOption_paysPremium', label: 'Buy bundle option pays premium to writer', proves: 'Premium flows to writer immediately on purchase', category: 'Happy Path', gas: 358880 },
+      { name: 'test_exerciseBundleOption_twoStep', label: '2-step exercise: approve strike → exercise → receive Bundle NFT', proves: 'Buyer pays strike USDC and receives Bundle NFT in one atomic call', category: 'Happy Path', gas: 410220 },
+      { name: 'test_exerciseBundleOption_buyerCanUnwrap', label: 'After exercise, buyer can unwrap bundle for underlying assets', proves: 'withdrawBundle() after exercise delivers all ERC-20s and ERC-721s', category: 'Happy Path', gas: 480110 },
+      { name: 'test_cancelBundleOption_returnsNFT', label: 'Writer cancels unbought option → Bundle NFT returned', proves: 'Writer can retrieve collateral before any buyer', category: 'Happy Path', gas: 285330 },
+      { name: 'test_reclaimBundle_afterExpiry', label: 'Writer reclaims Bundle NFT after expiry (unexercised)', proves: 'Collateral returned to writer when option expires unexercised', category: 'Happy Path', gas: 292440 },
+      { name: 'test_cannotExercise_withoutApproval', label: 'Exercise reverts without USDC strike approval', proves: 'Buyer must pre-approve strike USDC to CallVault before exercising', category: 'Edge Case', gas: 210880 },
+      { name: 'test_cannotExercise_afterExpiry', label: 'Exercise reverts after expiry', proves: 'Expired bundle options cannot be exercised', category: 'Edge Case', gas: 198440 },
+      { name: 'test_cannotCancel_afterBuy', label: 'Cancel reverts after buyer has purchased', proves: 'Writer cannot cancel a sold bundle option', category: 'Edge Case', gas: 205660 },
+    ],
+  },
+  {
     contract: 'StakingInvariant',
     file: 'test/invariants/StakingInvariant.t.sol',
     color: 'yellow',
@@ -220,14 +251,67 @@ const BASESCAN = 'https://sepolia.basescan.org/address/';
 
 // ─── Contract links for overview ─────────────────────────────────────────────
 
-const DEPLOYED_CONTRACTS = [
-  { name: 'ClawToken ($STREET)',    addr: CONTRACT_ADDRESSES.CLAW_TOKEN },
-  { name: 'ClawStreetStaking',      addr: CONTRACT_ADDRESSES.STAKING },
-  { name: 'ClawStreetLoan',         addr: CONTRACT_ADDRESSES.LOAN_ENGINE },
-  { name: 'ClawStreetCallVault',    addr: CONTRACT_ADDRESSES.CALL_VAULT },
-  { name: 'ClawStreetBundleVault',  addr: CONTRACT_ADDRESSES.BUNDLE_VAULT },
-  { name: 'MockUSDC',               addr: CONTRACT_ADDRESSES.MOCK_USDC },
-  { name: 'MockNFT',                addr: CONTRACT_ADDRESSES.MOCK_NFT },
+const DEPLOYED_CONTRACTS: { name: string; tag: string; addr: string; methods: string[] }[] = [
+  {
+    name: 'ClawStreetLoan',
+    tag: 'Core',
+    addr: CONTRACT_ADDRESSES.LOAN_ENGINE,
+    methods: ['createLoanOffer', 'acceptLoan', 'repayLoan', 'claimDefault', 'getHealthScore', 'setBundleVault', 'setTokenPriceFeed'],
+  },
+  {
+    name: 'ClawStreetCallVault',
+    tag: 'Core',
+    addr: CONTRACT_ADDRESSES.CALL_VAULT,
+    methods: ['writeCoveredCall', 'buyOption', 'exerciseOption', 'reclaimUnderlying', 'writeBundleCall', 'buyBundleOption', 'exerciseBundleOption', 'cancelBundleOption', 'reclaimBundle'],
+  },
+  {
+    name: 'ClawStreetBundleVault',
+    tag: 'Core',
+    addr: CONTRACT_ADDRESSES.BUNDLE_VAULT,
+    methods: ['depositBundle', 'withdrawBundle', 'getBundleContent', 'ownerOf'],
+  },
+  {
+    name: 'ClawStreetStaking',
+    tag: 'Core',
+    addr: CONTRACT_ADDRESSES.STAKING,
+    methods: ['stake', 'unstake', 'claimRevenue', 'pendingRevenue', 'lockRemaining', 'totalStaked', 'positions'],
+  },
+  {
+    name: 'ClawToken ($STREET)',
+    tag: 'Token',
+    addr: CONTRACT_ADDRESSES.CLAW_TOKEN,
+    methods: ['mint', 'burn', 'transfer', 'approve', 'balanceOf', 'MAX_SUPPLY'],
+  },
+  {
+    name: 'MockUSDC',
+    tag: 'Token',
+    addr: CONTRACT_ADDRESSES.MOCK_USDC,
+    methods: ['mint', 'transfer', 'approve', 'allowance', 'balanceOf'],
+  },
+  {
+    name: 'MockNFT',
+    tag: 'NFT',
+    addr: CONTRACT_ADDRESSES.MOCK_NFT,
+    methods: ['mint', 'ownerOf', 'approve', 'transferFrom'],
+  },
+  {
+    name: 'TestWETH',
+    tag: 'Test Token',
+    addr: TEST_TOKENS.WETH,
+    methods: ['mint', 'approve', 'balanceOf', 'decimals'],
+  },
+  {
+    name: 'TestWBTC',
+    tag: 'Test Token',
+    addr: TEST_TOKENS.WBTC,
+    methods: ['mint', 'approve', 'balanceOf', 'decimals'],
+  },
+  {
+    name: 'TestLINK',
+    tag: 'Test Token',
+    addr: TEST_TOKENS.LINK,
+    methods: ['mint', 'approve', 'balanceOf', 'decimals'],
+  },
 ];
 
 // ─── Tab bar ──────────────────────────────────────────────────────────────────
@@ -235,7 +319,7 @@ const DEPLOYED_CONTRACTS = [
 function TabBar({ tab, setTab }: { tab: Tab; setTab: (t: Tab) => void }) {
   const tabs: { id: Tab; label: string; desc: string }[] = [
     { id: 'overview',   label: '① Overview',         desc: 'Stats & contracts' },
-    { id: 'browser',    label: '② Test Browser',     desc: 'All 284 tests' },
+    { id: 'browser',    label: '② Test Browser',     desc: 'All 300 tests' },
     { id: 'live',       label: '③ Live Testnet',      desc: 'Wallet required' },
     { id: 'automation', label: '④ Automation',        desc: 'CTP daemon & reports' },
   ];
@@ -322,24 +406,44 @@ function OverviewMode() {
 
       {/* Deployed contracts */}
       <div className="bg-cyber-surface border border-cyber-border rounded-xl p-4">
-        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-widest mb-3">Deployed Contracts</h3>
-        <div className="space-y-2">
-          {DEPLOYED_CONTRACTS.map(({ name, addr }) => (
-            <div key={addr} className="flex items-center justify-between py-1.5 border-b border-cyber-border/40 last:border-0">
-              <span className="text-sm text-gray-300">{name}</span>
-              <div className="flex items-center gap-3">
-                <code className="text-xs text-gray-500 font-mono hidden sm:block">{addr.slice(0,8)}…{addr.slice(-6)}</code>
-                <a
-                  href={`${BASESCAN}${addr}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-xs px-2.5 py-1 bg-base-blue/10 text-base-blue border border-base-blue/20 rounded-md hover:bg-base-blue/20 transition-colors"
-                >
-                  Basescan ↗
-                </a>
+        <h3 className="text-sm font-semibold text-gray-300 uppercase tracking-widest mb-3">Deployed Contracts — Base Sepolia</h3>
+        <div className="space-y-0">
+          {DEPLOYED_CONTRACTS.map(({ name, tag, addr, methods }) => {
+            const tagColor =
+              tag === 'Core'       ? 'bg-base-blue/15 text-base-blue border-base-blue/25'        :
+              tag === 'Token'      ? 'bg-green-500/15 text-green-400 border-green-500/25'         :
+              tag === 'NFT'        ? 'bg-purple-500/15 text-purple-400 border-purple-500/25'      :
+              'bg-yellow-500/15 text-yellow-400 border-yellow-500/25';
+            return (
+              <div key={addr} className="py-3 border-b border-cyber-border/30 last:border-0">
+                <div className="flex items-center justify-between mb-1.5">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-semibold text-white">{name}</span>
+                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${tagColor}`}>{tag}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <code className="text-[11px] text-gray-500 font-mono hidden sm:block">{addr.slice(0,8)}…{addr.slice(-6)}</code>
+                    <a
+                      href={`${BASESCAN}${addr}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs px-2.5 py-1 bg-base-blue/10 text-base-blue border border-base-blue/20 rounded-md hover:bg-base-blue/20 transition-colors shrink-0"
+                    >
+                      Basescan ↗
+                    </a>
+                  </div>
+                </div>
+                {/* Methods strip */}
+                <div className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-none">
+                  {methods.map(m => (
+                    <span key={m} className="shrink-0 text-[10px] font-mono bg-cyber-bg border border-cyber-border text-gray-400 px-2 py-0.5 rounded whitespace-nowrap hover:border-base-blue/40 hover:text-gray-200 transition-colors cursor-default">
+                      {m}()
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 

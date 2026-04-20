@@ -36,6 +36,10 @@ Base URL (local dev): `http://localhost:3000`
 | POST | `/api/skills/createLoanOffer` | — | Encode a `createLoanOffer` calldata payload |
 | POST | `/api/skills/hedgeCall` | — | Encode a `writeCoveredCall` calldata payload |
 | POST | `/api/skills/discoverOpportunity` | — | Mock opportunity discovery |
+| **On-Chain (direct — no server needed)** | | | |
+| — | `CallVault.exerciseOption(id)` | buyer | Requires prior `USDC.approve(CALL_VAULT, strike)` — see Step 6 |
+| — | `CallVault.writeBundleCall(...)` | writer | Requires prior `BundleVault.approve(CALL_VAULT, bundleId)` |
+| — | `CallVault.exerciseBundleOption(id)` | buyer | Requires prior `USDC.approve(CALL_VAULT, strike)` |
 
 ---
 
@@ -130,6 +134,52 @@ const myOffers = await fetch(`http://localhost:3000/api/negotiate/my?address=${a
 await wallet.writeContract({ address: MOCK_USDC, abi: approveAbi, functionName: 'approve', args: [LOAN_ENGINE, principal] });
 await wallet.writeContract({ address: LOAN_ENGINE, abi: acceptLoanAbi, functionName: 'acceptLoan', args: [5n, []] });
 ```
+
+### Step 6 — Exercising an Option (2-step approval required)
+
+`exerciseOption` requires the buyer to pre-approve **strike USDC** (not just premium) to the CallVault.
+Strike is typically much larger than premium (e.g., 2000 USDC strike vs 40 USDC premium).
+
+```typescript
+const CALL_VAULT = '0x69730728a0B19b844bc18888d2317987Bc528baE';
+const MOCK_USDC  = '0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A';
+
+const VAULT_ABI = parseAbi([
+  'function options(uint256) external view returns (address writer, address buyer, address underlying, uint256 amount, uint256 strike, uint256 expiry, uint256 premium, bool exercised, bool active)',
+  'function exerciseOption(uint256 optionId) external',
+]);
+const ERC20_ABI = parseAbi([
+  'function allowance(address owner, address spender) external view returns (uint256)',
+  'function approve(address spender, uint256 amount) external returns (bool)',
+]);
+
+// Read the option to get strike amount
+const opt = await pub.readContract({
+  address: CALL_VAULT, abi: VAULT_ABI, functionName: 'options', args: [optionId],
+}) as any[];
+const strike = opt[4]; // bigint, 6 decimals
+
+// Step 1: Check allowance and approve if needed
+const allowance = await pub.readContract({
+  address: MOCK_USDC, abi: ERC20_ABI,
+  functionName: 'allowance', args: [account.address, CALL_VAULT],
+});
+if (allowance < strike) {
+  await wal.writeContract({
+    address: MOCK_USDC, abi: ERC20_ABI,
+    functionName: 'approve', args: [CALL_VAULT, strike],
+  });
+}
+
+// Step 2: Exercise
+const hash = await wal.writeContract({
+  address: CALL_VAULT, abi: VAULT_ABI,
+  functionName: 'exerciseOption', args: [optionId],
+});
+console.log('Exercised option, tx:', hash);
+```
+
+> **Important:** Always check allowance before exercising. A missing strike approval causes a silent revert with no useful error message. The UI shows a 2-step "Approve X USDC → Exercise" flow for this reason.
 
 See [AgentSDK.md](./AgentSDK.md) for full TypeScript examples with complete ABIs.
 
@@ -490,16 +540,80 @@ Returns mock opportunity suggestions. For production use `getLogs` or `/api/cycl
 
 ---
 
+## Bundle Covered Calls
+
+ClawStreetCallVault supports **bundle covered calls** — options where the underlying is a Bundle NFT
+(a ClawStreetBundleVault token representing a basket of ERC-20s and ERC-721s) rather than a plain ERC-20.
+
+### Bundle Option Lifecycle
+
+| Step | Function | Who | USDC flow |
+|------|----------|-----|-----------|
+| Write | `writeBundleCall(bundleVault, bundleId, strike, expiry, premium)` | Writer | locks Bundle NFT |
+| Buy | `buyBundleOption(bundleOptId)` | Buyer | premium → writer |
+| Exercise | `exerciseBundleOption(bundleOptId)` | Buyer | strike → writer; receives Bundle NFT |
+| Unwrap | `withdrawBundle(bundleId)` on BundleVault | Buyer | receives ERC-20s + ERC-721s |
+| Cancel (pre-buy) | `cancelBundleOption(bundleOptId)` | Writer | Bundle NFT returned |
+| Reclaim (post-expiry) | `reclaimBundle(bundleOptId)` | Writer | Bundle NFT returned |
+
+### TypeScript — Write a Bundle Call
+
+```typescript
+const BUNDLE_VAULT_ABI = parseAbi([
+  'function approve(address to, uint256 tokenId) external',
+]);
+const CALL_VAULT_ABI = parseAbi([
+  'function writeBundleCall(address bundleVault, uint256 bundleId, uint256 strike, uint256 expiry, uint256 premium) external returns (uint256)',
+  'function bundleOptions(uint256) external view returns (address writer, address buyer, address bundleVault, uint256 bundleId, uint256 strike, uint256 expiry, uint256 premium, bool exercised, bool active)',
+  'function buyBundleOption(uint256 bundleOptId) external',
+  'function exerciseBundleOption(uint256 bundleOptId) external',
+  'function cancelBundleOption(uint256 bundleOptId) external',
+  'function reclaimBundle(uint256 bundleOptId) external',
+]);
+
+const BUNDLE_VAULT = CONTRACT_ADDRESSES.BUNDLE_VAULT;
+const CALL_VAULT   = '0x69730728a0B19b844bc18888d2317987Bc528baE';
+
+// Writer: approve CallVault to hold the Bundle NFT, then write the call
+await wal.writeContract({ address: BUNDLE_VAULT, abi: BUNDLE_VAULT_ABI, functionName: 'approve', args: [CALL_VAULT, bundleId] });
+const bundleOptId = await wal.writeContract({
+  address: CALL_VAULT, abi: CALL_VAULT_ABI, functionName: 'writeBundleCall',
+  args: [BUNDLE_VAULT, bundleId, parseUnits('2000', 6), BigInt(expiry), parseUnits('50', 6)],
+});
+```
+
+### TypeScript — Exercise a Bundle Call (2-step)
+
+```typescript
+const opt = await pub.readContract({
+  address: CALL_VAULT, abi: CALL_VAULT_ABI, functionName: 'bundleOptions', args: [bundleOptId],
+}) as any[];
+const strike = opt[4]; // bigint, 6 decimals
+
+// Step 1: Approve strike USDC
+await wal.writeContract({ address: MOCK_USDC, abi: erc20Abi, functionName: 'approve', args: [CALL_VAULT, strike] });
+
+// Step 2: Exercise — receive Bundle NFT
+await wal.writeContract({ address: CALL_VAULT, abi: CALL_VAULT_ABI, functionName: 'exerciseBundleOption', args: [bundleOptId] });
+
+// Step 3 (optional): Unwrap the Bundle NFT → receive underlying ERC-20s
+const BUNDLE_ABI = parseAbi(['function withdrawBundle(uint256 tokenId) external']);
+await wal.writeContract({ address: BUNDLE_VAULT, abi: BUNDLE_ABI, functionName: 'withdrawBundle', args: [bundleId] });
+```
+
+---
+
 ## Contract Addresses (Base Sepolia)
 
-| Contract | Address |
-|----------|---------|
-| LoanEngine | `0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c` |
-| CallVault | `0x69730728a0B19b844bc18888d2317987Bc528baE` |
-| MockUSDC | `0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A` |
-| MockNFT | `0x41119aAd1c69dba3934D0A061d312A52B06B27DF` |
-| CLAW Token | `0xD11fC366828445B874F5202109E5f48C4D14FCe4` |
-| Staking | `0xADBf89BA38915B9CF18E0a24Ea3E27F39d920bd3` |
+| Contract | Address | Notes |
+|----------|---------|-------|
+| LoanEngine | `0x96C3291C9b0C34b007893326ee9dcA534BfcFa0c` | createLoanOffer / acceptLoan / claimDefault |
+| CallVault | `0x69730728a0B19b844bc18888d2317987Bc528baE` | writeCoveredCall / buyOption / exerciseOption; writeBundleCall / exerciseBundleOption |
+| BundleVault | `0x...` (see `src/config/contracts.ts`) | depositBundle / withdrawBundle; used as collateral in LoanEngine + CallVault |
+| MockUSDC | `0xDCf9936b330D6957CaD463f850D1F2B6F1eABc3A` | Standard ERC-20, 6 decimals — used for premium, strike, principal |
+| MockNFT | `0x41119aAd1c69dba3934D0A061d312A52B06B27DF` | Test NFT for single-asset loan collateral |
+| CLAW Token | `0xD11fC366828445B874F5202109E5f48C4D14FCe4` | $STREET ERC-20, 18 decimals |
+| Staking | `0xADBf89BA38915B9CF18E0a24Ea3E27F39d920bd3` | Stake STREET → ClawPass NFT + USDC revenue |
 
 Full ABI JSON: `config/base-sepolia.json`
 

@@ -50,7 +50,7 @@ export default function Landing() {
             </h1>
             
             <p className="text-lg text-gray-400 mb-10 leading-relaxed max-w-2xl mx-auto">
-              Unlock liquidity from NFTs, hedge portfolios with on-chain options, and earn yield. Built natively for the OpenClaw AI agent economy.
+              Agentic liquidity from any token, hedge portfolios with on-chain options & earn yield. Built natively for the OpenClaw AI agent economy.
             </p>
             
             <div className="flex flex-col sm:flex-row justify-center gap-4">

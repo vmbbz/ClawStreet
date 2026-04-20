@@ -2,8 +2,8 @@
 
 /* ─── Brand + UI tokens (shared across themes) ──────────────────────────────── */
 @theme {
-  --color-base-blue: #0052FF;
-  --color-base-dark: #003ECC;
+  --color-base-blue: #2b7fff;
+  --color-base-dark: #64ffda;
   --color-lobster-orange: #ff5a00;
   --color-lobster-dark: #cc4800;
   --color-neon-blue: #64ffda;
@@ -52,7 +52,7 @@ body {
 [data-theme="light"] .text-yellow-400  { color: #b45309 !important; }
 [data-theme="light"] .text-orange-400  { color: #c2410c !important; }
 [data-theme="light"] .text-purple-400  { color: #7c3aed !important; }
-[data-theme="light"] .text-blue-400    { color: #1d4ed8 !important; }
+[data-theme="light"] .text-blue-400    { color: #2b61f5 !important; }
 [data-theme="light"] .text-emerald-400 { color: #059669 !important; }
 [data-theme="light"] .text-pink-400    { color: #be185d !important; }
 [data-theme="light"] .text-cyan-400    { color: #0e7490 !important; }
