@@ -172,11 +172,10 @@ export default function OptionDetails() {
   const { writeContract: exerciseOpt, isPending: isExercising, data: exerciseTxHash } = useWriteContract();
   const { isLoading: isExerciseConfirming, isSuccess: isExerciseSuccess } = useWaitForTransactionReceipt({ hash: exerciseTxHash });
 
-  // Strike amount in raw USDC units (6 decimals) — needed for approve step
-  // displayData.strike is a formatted string like "2000"; parseUnits converts to 2000000000n
-  const strikeRaw = (() => {
-    try { return parseUnits(displayData?.strike ?? '0', 6); } catch { return 0n; }
-  })();
+  // Strike amount in raw USDC units (6 decimals) — needed for approve step.
+  // Read directly from optionData[4] (already a raw uint256) to avoid a
+  // use-before-declaration on displayData which is computed further below.
+  const strikeRaw = optionData ? (optionData[4] as bigint) : 0n;
 
   // Read current USDC allowance for CALL_VAULT (buyer must approve strike before exercising)
   const { data: usdcAllowance, refetch: refetchAllowance } = useReadContract({
