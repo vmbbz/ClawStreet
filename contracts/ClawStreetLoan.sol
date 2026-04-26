@@ -18,6 +18,13 @@ import "./interfaces/IAgentReputation.sol";
 
 interface IClawStreetStaking {
     function notifyFee(uint256 amount) external;
+    function positions(address staker) external view returns (
+        uint256 staked,
+        uint256 stakedAt,
+        uint256 rewardDebt,
+        uint256 passId,
+        bool hasPass
+    );
 }
 
 interface IClawStreetBundleVault {
@@ -204,6 +211,12 @@ contract ClawStreetLoan is
             } else if (score < 500) {
                 repMultiplier = 90; // 0.90x
             }
+        }
+
+        // ClawPass boost: +5% on top of any reputation multiplier
+        if (address(stakingContract) != address(0)) {
+            (,,,,bool hasPass) = stakingContract.positions(borrower);
+            if (hasPass) repMultiplier = (repMultiplier * 105) / 100;
         }
 
         // Final Score

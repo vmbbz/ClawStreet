@@ -8,6 +8,10 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
+interface IClawStreetStakingFee {
+    function notifyFee(uint256 amount) external;
+}
+
 contract ClawStreetCallVault is
     Initializable,
     UUPSUpgradeable,
@@ -47,6 +51,7 @@ contract ClawStreetCallVault is
 
     mapping(uint256 => BundleCallOption) public bundleOptions;
     uint256 public bundleOptionCounter;
+    address public stakingContract;
 
     event OptionWritten(uint256 indexed optionId, address indexed writer, uint256 amount, uint256 strike, uint256 premium);
     event OptionBought(uint256 indexed optionId, address indexed buyer);
@@ -119,13 +124,27 @@ contract ClawStreetCallVault is
         emit OptionCancelled(optionId);
     }
 
+    function setStakingContract(address _staking) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        stakingContract = _staking;
+    }
+
     function buyOption(uint256 optionId) external nonReentrant {
         CallOption storage option = options[optionId];
         require(option.active && option.buyer == address(0), "Not available");
         require(block.timestamp < option.expiry, "Expired");
 
-        // Transfer premium to writer
-        require(premiumToken.transferFrom(msg.sender, option.writer, option.premium), "Premium transfer failed");
+        uint256 premium = option.premium;
+
+        if (stakingContract != address(0)) {
+            uint256 fee = premium / 100;          // 1% to stakers
+            uint256 writerAmount = premium - fee; // 99% to writer
+            require(premiumToken.transferFrom(msg.sender, address(this), premium), "Premium transfer failed");
+            require(premiumToken.transfer(option.writer, writerAmount), "Writer transfer failed");
+            require(premiumToken.transfer(stakingContract, fee), "Fee transfer failed");
+            IClawStreetStakingFee(stakingContract).notifyFee(fee);
+        } else {
+            require(premiumToken.transferFrom(msg.sender, option.writer, premium), "Premium transfer failed");
+        }
 
         option.buyer = msg.sender;
         emit OptionBought(optionId, msg.sender);
@@ -198,13 +217,24 @@ contract ClawStreetCallVault is
         return bundleOptId;
     }
 
-    /// @notice Buy a bundle option. Pays premium to writer immediately.
+    /// @notice Buy a bundle option. Pays premium to writer immediately (1% to stakers).
     function buyBundleOption(uint256 bundleOptId) external nonReentrant {
         BundleCallOption storage opt = bundleOptions[bundleOptId];
         require(opt.active && opt.buyer == address(0), "Not available");
         require(block.timestamp < opt.expiry, "Expired");
 
-        require(premiumToken.transferFrom(msg.sender, opt.writer, opt.premium), "Premium transfer failed");
+        uint256 premium = opt.premium;
+
+        if (stakingContract != address(0)) {
+            uint256 fee = premium / 100;
+            uint256 writerAmount = premium - fee;
+            require(premiumToken.transferFrom(msg.sender, address(this), premium), "Premium transfer failed");
+            require(premiumToken.transfer(opt.writer, writerAmount), "Writer transfer failed");
+            require(premiumToken.transfer(stakingContract, fee), "Fee transfer failed");
+            IClawStreetStakingFee(stakingContract).notifyFee(fee);
+        } else {
+            require(premiumToken.transferFrom(msg.sender, opt.writer, premium), "Premium transfer failed");
+        }
 
         opt.buyer = msg.sender;
         emit BundleOptionBought(bundleOptId, msg.sender);

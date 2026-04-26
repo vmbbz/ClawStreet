@@ -70,6 +70,16 @@ contract MockPythInteg {
     function updatePriceFeeds(bytes[] calldata) external payable {}
 }
 
+/// @dev Minimal staking mock: all stakers have hasPass = true.
+contract MockStakingForLoan {
+    function notifyFee(uint256) external {}
+    function positions(address) external view returns (
+        uint256 staked, uint256 stakedAt, uint256 rewardDebt, uint256 passId, bool hasPass
+    ) {
+        return (1e18, block.timestamp, 0, 1, true);
+    }
+}
+
 // ─── Integration test: BundleVault → LoanEngine ───────────────────────────────
 
 /**
@@ -309,6 +319,28 @@ contract ClawStreetBundleVaultLoan is Test {
         uint256 health = loan.getHealthScore(address(vault), bundleId, PRINCIPAL, borrower);
         // Bundle-aware pricing: 0.5 WETH * $2000 = $1000 value. Principal = $400. LTV = 40% → health 100.
         assertEq(health, 100, "health score should be 100 for bundle LTV 40%");
+    }
+
+    /// @notice ClawPass 5% health boost: same collateral, lower LTV → baseScore < 100 → ClawPass lifts it.
+    ///         0.5 WETH @ $2000 = $1000 bundle value. Principal $600 → LTV 60% → excess 1000 bps
+    ///         → penalty 20 → baseScore 80. Without pass: finalScore = 80. With pass: 80 * 105/100 = 84.
+    function test_healthScore_clawPassBoost() public {
+        uint256 bundleId = _depositBundle();
+
+        // Without ClawPass: no staking contract wired
+        uint256 healthNoPass = loan.getHealthScore(address(vault), bundleId, 600e6, borrower);
+        // LTV = 60% (over 50% safe threshold) → baseScore = 80; no discounts; no pass
+        assertEq(healthNoPass, 80, "baseline health without ClawPass");
+
+        // Wire in MockStaking (all stakers have hasPass = true)
+        MockStakingForLoan mockStaking = new MockStakingForLoan();
+        vm.prank(admin);
+        loan.setStakingContract(address(mockStaking));
+
+        uint256 healthWithPass = loan.getHealthScore(address(vault), bundleId, 600e6, borrower);
+        // 80 * 105 / 100 = 84
+        assertEq(healthWithPass, 84, "ClawPass 5% boost lifts health from 80 to 84");
+        assertGt(healthWithPass, healthNoPass, "ClawPass always improves health score");
     }
 
     function test_cancelLoanOffer_returnsBundle() public {

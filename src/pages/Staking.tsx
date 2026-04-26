@@ -95,13 +95,18 @@ function StatTile({ label, value, sub, color = 'text-white', icon }: {
 
 // ─── Benefit pill ─────────────────────────────────────────────────────────────
 
-function Benefit({ icon, title, desc }: { icon: React.ReactNode; title: string; desc: string }) {
+function Benefit({ icon, title, desc, live }: { icon: React.ReactNode; title: string; desc: string; live: boolean }) {
   return (
     <div className="flex items-start gap-3 p-4 bg-cyber-surface border border-cyber-border rounded-xl hover:border-base-blue/30 transition-colors">
       <div className="p-2 rounded-lg bg-base-blue/10 text-base-blue shrink-0">{icon}</div>
-      <div>
-        <p className="text-sm font-semibold text-white">{title}</p>
-        <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">{desc}</p>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2 mb-0.5">
+          <p className="text-sm font-semibold text-white">{title}</p>
+          <span className={`shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full ${live ? 'bg-green-500/15 text-green-400' : 'bg-amber-500/15 text-amber-400'}`}>
+            {live ? '● Live' : '◌ Soon'}
+          </span>
+        </div>
+        <p className="text-xs text-gray-500 leading-relaxed">{desc}</p>
       </div>
     </div>
   );
@@ -264,7 +269,7 @@ export default function Staking() {
             Stake <span className="text-base-blue">$STREET</span>
           </h1>
           <p className="text-lg text-gray-400 max-w-xl mx-auto leading-relaxed">
-            Lock tokens to mint your <span className="text-white font-semibold">ClawPass NFT</span>. Earn protocol revenue from every deal, govern the street, and get priority OTC access.
+            Lock tokens to mint your <span className="text-white font-semibold">ClawPass NFT</span>. Earn pro-rata USDC from every loan and option deal closed on-protocol, and boost your agent credit score.
           </p>
         </div>
       </div>
@@ -314,22 +319,26 @@ export default function Staking() {
               <Benefit
                 icon={<TrendingUp size={14} />}
                 title="Protocol Revenue Share"
-                desc="Earn a pro-rata slice of every broker fee collected from loans and option sales."
-              />
-              <Benefit
-                icon={<Zap size={14} />}
-                title="Priority OTC Matching"
-                desc="ClawPass holders get early visibility into large OTC deals before market listing."
-              />
-              <Benefit
-                icon={<Shield size={14} />}
-                title="On-Chain Governance"
-                desc="Vote on protocol parameters, fee rates, and new market listings via your Pass."
+                desc="1% of every loan origination fee and option premium is distributed pro-rata to all STREET stakers in USDC."
+                live={true}
               />
               <Benefit
                 icon={<Users size={14} />}
                 title="Agent Score Boost"
-                desc="Agents holding a ClawPass receive a 1.10× reputation multiplier on loan health scoring."
+                desc="Holding a ClawPass adds a 5% LTV multiplier on top of your on-chain reputation score — borrow more against the same collateral."
+                live={true}
+              />
+              <Benefit
+                icon={<Shield size={14} />}
+                title="On-Chain Governance"
+                desc="Vote on protocol fee rates, new collateral types, and treasury allocations via your Pass."
+                live={false}
+              />
+              <Benefit
+                icon={<Zap size={14} />}
+                title="Priority Deal Routing"
+                desc="ClawPass holders are surfaced first in the agent deal-matching queue."
+                live={false}
               />
             </div>
           </div>
@@ -540,7 +549,7 @@ export default function Staking() {
               <p className="text-xs font-bold uppercase tracking-widest text-gray-400">Revenue Sources</p>
               {[
                 { label: 'Loan Brokerage Fee', pct: '1%', desc: 'of every accepted loan principal' },
-                { label: 'Option Premium Cut', pct: '~0%', desc: 'writer keeps full premium (direct)' },
+                { label: 'Option Premium Cut', pct: '1%', desc: '1% of premium routed to stakers on buy' },
                 { label: 'Exercise Spread', pct: 'n/a', desc: 'strike goes to option writer' },
               ].map(({ label, pct, desc }) => (
                 <div key={label} className="flex items-start justify-between gap-3">
