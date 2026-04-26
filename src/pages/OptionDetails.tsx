@@ -123,6 +123,9 @@ export default function OptionDetails() {
   const [expandedWidget, setExpandedWidget]             = useState<'moneyness' | 'breakeven' | 'expiry' | null>(null);
   const [showCertificate, setShowCertificate]           = useState(false);
   const [countdown, setCountdown]                       = useState('');
+  // Tracks the 2-step exercise flow so the UI doesn't revert to "Approve" while
+  // the allowance refetch is in-flight after confirmation.
+  const [exerciseStep, setExerciseStep]                 = useState<'idle' | 'approving' | 'exercising'>('idle');
 
   // ── Event log ───────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -190,9 +193,21 @@ export default function OptionDetails() {
   const { writeContract: approveUsdc, isPending: isApproving, data: approveTxHash } = useWriteContract();
   const { isSuccess: isApproveSuccess } = useWaitForTransactionReceipt({ hash: approveTxHash });
 
+  // After approval confirms: refetch allowance AND auto-trigger exercise (step 2).
+  // This prevents the "Approve" button from flickering back while the allowance
+  // refetch is still in-flight.
   useEffect(() => {
-    if (isApproveSuccess) refetchAllowance();
-  }, [isApproveSuccess, refetchAllowance]);
+    if (isApproveSuccess && exerciseStep === 'approving') {
+      setExerciseStep('exercising');
+      refetchAllowance();
+      exerciseOpt({
+        address: CONTRACT_ADDRESSES.CALL_VAULT,
+        abi: clawStreetCallVaultABI,
+        functionName: 'exercise',
+        args: [BigInt(id || '0')],
+      } as any);
+    }
+  }, [isApproveSuccess, exerciseStep, exerciseOpt, id, refetchAllowance]);
 
   const handleExercise = () => {
     exerciseOpt({
@@ -341,26 +356,36 @@ export default function OptionDetails() {
           {/* Exercise — 2-step: approve USDC for strike, then exercise */}
           {!isMockData && optionData && displayData.active && !displayData.exercised && !isExpired &&
            !isAvailable && address && displayData.buyer.toLowerCase() === address.toLowerCase() && (
-            needsApproval ? (
+            // Step 1: needs approval AND haven't started yet
+            exerciseStep === 'idle' && needsApproval ? (
               <button
-                onClick={() => approveUsdc({
-                  address: CONTRACT_ADDRESSES.MOCK_USDC,
-                  abi: parseAbi(['function approve(address,uint256) returns (bool)']),
-                  functionName: 'approve',
-                  args: [CONTRACT_ADDRESSES.CALL_VAULT, strikeRaw],
-                } as any)}
+                onClick={() => {
+                  setExerciseStep('approving');
+                  approveUsdc({
+                    address: CONTRACT_ADDRESSES.MOCK_USDC,
+                    abi: parseAbi(['function approve(address,uint256) returns (bool)']),
+                    functionName: 'approve',
+                    args: [CONTRACT_ADDRESSES.CALL_VAULT, strikeRaw],
+                  } as any);
+                }}
                 disabled={isApproving}
                 className="px-5 py-2.5 bg-base-blue text-white rounded-lg font-semibold text-sm hover:opacity-90 transition-opacity disabled:opacity-50"
               >
                 {isApproving ? 'Approving…' : `Approve ${displayData.strike} USDC (1/2)`}
               </button>
+            ) : exerciseStep === 'approving' || isApproving ? (
+              // Locked in "approving" state — never reverts to approve button
+              <button disabled className="px-5 py-2.5 bg-base-blue/60 text-white rounded-lg font-semibold text-sm opacity-70 cursor-wait">
+                Approving… (1/2)
+              </button>
             ) : (
+              // Step 2: allowance satisfied OR auto-chained from approval
               <button
                 onClick={handleExercise}
-                disabled={isExercising || isExerciseConfirming || isExerciseSuccess}
+                disabled={isExercising || isExerciseConfirming || isExerciseSuccess || exerciseStep === 'exercising'}
                 className="px-5 py-2.5 bg-claw-pink text-white rounded-lg font-semibold text-sm hover:bg-claw-dark transition-colors disabled:opacity-50"
               >
-                {isExercising || isExerciseConfirming ? 'Exercising…' : isExerciseSuccess ? 'Exercised ✓' : 'Exercise Option (2/2)'}
+                {isExercising || isExerciseConfirming || exerciseStep === 'exercising' ? 'Exercising…' : isExerciseSuccess ? 'Exercised ✓' : 'Exercise Option (2/2)'}
               </button>
             )
           )}

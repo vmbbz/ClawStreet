@@ -640,9 +640,9 @@ function LoanCard({ id, isMock, address, myDeals, activeOnly }: { key?: React.Ke
           {displayData.loanStatus === 'ended' && (
             <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-red-500/20 text-red-400 border border-red-500/30 uppercase tracking-wider">ENDED</span>
           )}
-          {/* TEST CYCLE badge */}
-          {displayData.isAgent && !isMock && displayData.loanStatus === 'open' && (
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 uppercase tracking-wider" title="Created by CTP automation — external funding welcome">
+          {/* TEST CYCLE badge — shown for all agent-created loans regardless of status */}
+          {displayData.isAgent && !isMock && (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 uppercase tracking-wider" title="Created by CTP automation">
               TEST CYCLE
             </span>
           )}
@@ -881,9 +881,9 @@ function OptionCard({ id, isMock, address, myDeals, activeOnly }: { key?: React.
           <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-claw-pink/15 text-claw-pink border border-claw-pink/30 uppercase tracking-wider">
             CALL OPTION
           </span>
-          {/* TEST CYCLE badge — shown when a known agent wrote an available (unbuilt) option */}
-          {displayData.isAgent && isAvailable && !isMock && (
-            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 uppercase tracking-wider" title="Created by CTP automation — external purchase welcome">
+          {/* TEST CYCLE badge — shown for all agent-created options regardless of status */}
+          {displayData.isAgent && !isMock && (
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-yellow-500/20 text-yellow-400 border border-yellow-500/30 uppercase tracking-wider" title="Created by CTP automation">
               TEST CYCLE
             </span>
           )}
